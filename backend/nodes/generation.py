@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.foundry_tools.rfd3 import run_rfd3_design
+from backend.bio.pdb import first_residue_name
 from backend.nodes.common import ExecutionContext, copy_paths_as_artifacts, node_dir, option, read_payload_files
 from backend.schemas.errors import BackendError, make_error
 from backend.schemas.payloads import TypedPayload
@@ -10,6 +11,7 @@ from backend.schemas.workflow import WorkflowNode
 async def rfdiffusion_smbinder(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:
     ligand = inputs["ligand"]
     ligand_path = ctx.store.absolute(ctx.run_id, ligand.paths[0])
+    ligand_residue_name = str(ligand.metadata.get("residue_name") or first_residue_name(ligand_path.read_text()))
     work_dir = node_dir(ctx, node)
     paths = await run_rfd3_design(
         run_id=ctx.run_id,
@@ -17,6 +19,7 @@ async def rfdiffusion_smbinder(ctx: ExecutionContext, node: WorkflowNode, inputs
         node_type=node.type,
         work_dir=work_dir,
         ligand_path=ligand_path,
+        ligand_residue_name=ligand_residue_name,
         length=option(node, "length"),
         n_batches=int(option(node, "nBatches", 1)),
         diffusion_batch_size=int(option(node, "diffusionBatchSize", 5)),

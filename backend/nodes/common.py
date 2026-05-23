@@ -21,6 +21,13 @@ class ExecutionContext:
     store: ArtifactStore
     registry: RunRegistry
     uploads: dict[str, list[EmbeddedUpload]]
+    ligand_counter: int = 0
+
+    def next_ligand_residue_name(self) -> str:
+        self.ligand_counter += 1
+        if self.ligand_counter > 9:
+            raise ValueError("Only nine auto-renamed single ligands are supported because PDB residue names are three characters.")
+        return f"L:{self.ligand_counter}"
 
     async def artifact_created(self, artifact: ArtifactMetadata) -> None:
         await self.registry.publish(

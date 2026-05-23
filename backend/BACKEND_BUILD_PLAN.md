@@ -252,8 +252,8 @@ Use an in-memory `asyncio.Queue` for initial run scheduling:
 2. A run id is created and a run directory is initialized.
 3. The run request is enqueued.
 4. A background worker pulls queued runs.
-5. The runner builds a normalized executable graph and adapts it to Ryvencore where useful.
-6. Nodes execute in topological order or through Ryvencore scheduling.
+5. The runner builds a normalized executable graph and maps it into a Ryvencore `Session` and `Flow`.
+6. Nodes execute through Ryvencore data-flow scheduling with registered Ryvencore `Node` and `Data` classes.
 7. Each node writes persistent artifacts before returning its typed payload.
 8. Runtime state and events are published to the run registry.
 9. Terminal save nodes materialize final outputs.

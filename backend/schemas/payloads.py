@@ -37,11 +37,15 @@ class TypedPayload(BaseModel):
         data = self.data[0] if isinstance(self.data, list) and self.data else self.data
         paths = self.paths[:1]
         artifact_ids = self.artifact_ids[:1]
+        metadata = dict(self.metadata)
+        residue_names = metadata.get("residue_names")
+        if type_name == "Ligand" and isinstance(residue_names, list) and residue_names:
+            metadata["residue_name"] = residue_names[0]
         return TypedPayload(
             type_name=type_name,
             item_count=1 if data is not None else 0,
             artifact_ids=artifact_ids,
             paths=paths,
-            metadata=self.metadata,
+            metadata=metadata,
             data=data,
         )

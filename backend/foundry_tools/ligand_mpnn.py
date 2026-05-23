@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.artifacts.store import ArtifactStore
-from backend.foundry_tools.common import collect_files, executable
+from backend.foundry_tools.mpnn import run_mpnn_design
 from backend.runtime.registry import RunRegistry
-from backend.runtime.subprocesses import run_command_streaming
 
 
 async def run_ligand_mpnn(
@@ -26,20 +25,24 @@ async def run_ligand_mpnn(
     registry: RunRegistry,
     store: ArtifactStore,
 ) -> list[Path]:
-    out_dir = work_dir / "ligand_mpnn_outputs"
-    command = [
-        executable("FOUNDRYUI_LIGAND_MPNN_BIN", "ligandmpnn"),
-        f"--input_dir={input_dir}",
-        f"--out_dir={out_dir}",
-        f"--{residue_role}={','.join(residues)}",
-        f"--number_of_batches={number_of_batches}",
-        f"--batch_size={batch_size}",
-        f"--seed={seed}",
-        f"--temperature={temperature}",
-    ]
-    if bias_aa:
-        command.append(f"--bias_AA={bias_aa}")
-    if omit_aa:
-        command.append(f"--omit_AA={omit_aa}")
-    await run_command_streaming(command=command, cwd=work_dir, run_id=run_id, node_id=node_id, node_type=node_type, registry=registry, store=store)
-    return collect_files(out_dir, (".fa", ".fasta"))
+    return await run_mpnn_design(
+        run_id=run_id,
+        node_id=node_id,
+        node_type=node_type,
+        work_dir=work_dir,
+        input_dir=input_dir,
+        out_dir_name="ligand_mpnn_outputs",
+        model_type="ligand_mpnn",
+        checkpoint_env="FOUNDRYUI_LIGAND_MPNN_CKPT",
+        checkpoint_default="models/ligandmpnn_v_32_010_25.pt",
+        residue_role=residue_role,
+        residues=residues,
+        number_of_batches=number_of_batches,
+        batch_size=batch_size,
+        seed=seed,
+        temperature=temperature,
+        bias_aa=bias_aa,
+        omit_aa=omit_aa,
+        registry=registry,
+        store=store,
+    )

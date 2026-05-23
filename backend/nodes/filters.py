@@ -66,7 +66,7 @@ async def filter_by_ligand(ctx: ExecutionContext, node: WorkflowNode, inputs: di
     if scores is not None:
         ensure_score_alignment(ctx, node, complexes, scores, ["complexes", "score"])
     contents = read_payload_files(ctx, complexes)
-    keep = [index for index, content in enumerate(contents) if "HETATM" in content or " LIG " in content]
+    keep = [index for index, content in enumerate(contents) if "HETATM" in content]
     out_dir = node_dir(ctx, node)
     artifacts = []
     kept_contents = []

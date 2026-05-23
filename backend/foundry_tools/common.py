@@ -18,4 +18,5 @@ def checkpoint_path(env_key: str, default_relative_path: str) -> Path:
 def collect_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
     if not root.exists():
         return []
-    return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in suffixes)
+    lowered_suffixes = tuple(suffix.lower() for suffix in suffixes)
+    return sorted(path for path in root.rglob("*") if path.is_file() and path.name.lower().endswith(lowered_suffixes))

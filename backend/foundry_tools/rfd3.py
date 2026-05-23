@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
+
+from Bio.PDB import MMCIFParser, PDBIO
 
 from backend.foundry_tools.common import checkpoint_path, collect_files, executable
 from backend.runtime.registry import RunRegistry
@@ -17,6 +20,7 @@ async def run_rfd3_design(
     node_type: str,
     work_dir: Path,
     ligand_path: Path,
+    ligand_residue_name: str,
     length: int | str,
     n_batches: int,
     diffusion_batch_size: int,
@@ -43,11 +47,11 @@ async def run_rfd3_design(
     payload = {
         "foundryui_design": {
             "input": str(ligand_path),
-            "ligand": "LIG",
-            "length": str(length),
-            "select_fixed_atoms": {"LIG": ",".join(select_fixed_atoms)},
-            "select_buried": {"LIG": ",".join(select_buried)},
-            "select_exposed": {"LIG": ",".join(select_exposed)},
+            "ligand": ligand_residue_name,
+            "length": str(length)+"-200",
+            "select_fixed_atoms": {ligand_residue_name: ",".join(select_fixed_atoms)},
+            "select_buried": {ligand_residue_name: ",".join(select_buried)},
+            "select_exposed": {ligand_residue_name: ",".join(select_exposed)},
         }
     }
     input_json.write_text(json.dumps(payload, indent=2))
@@ -61,4 +65,24 @@ async def run_rfd3_design(
         f"diffusion_batch_size={diffusion_batch_size}",
     ]
     await run_command_streaming(command=command, cwd=work_dir, run_id=run_id, node_id=node_id, node_type=node_type, registry=registry, store=store)
-    return collect_files(out_dir, (".pdb",))
+    return _standardize_rfd3_structures(out_dir, work_dir / "rfd3_pdb_outputs")
+
+
+def _standardize_rfd3_structures(out_dir: Path, pdb_dir: Path) -> list[Path]:
+    pdb_paths = collect_files(out_dir, (".pdb",))
+    cif_gz_paths = collect_files(out_dir, (".cif.gz",))
+    if not cif_gz_paths:
+        return pdb_paths
+
+    pdb_dir.mkdir(parents=True, exist_ok=True)
+    parser = MMCIFParser(QUIET=True)
+    converted_paths: list[Path] = []
+    for cif_gz_path in cif_gz_paths:
+        pdb_path = pdb_dir / f"{cif_gz_path.name.removesuffix('.cif.gz')}.pdb"
+        with gzip.open(cif_gz_path, "rt") as handle:
+            structure = parser.get_structure(cif_gz_path.stem, handle)
+        writer = PDBIO()
+        writer.set_structure(structure)
+        writer.save(str(pdb_path))
+        converted_paths.append(pdb_path)
+    return [*pdb_paths, *converted_paths]
