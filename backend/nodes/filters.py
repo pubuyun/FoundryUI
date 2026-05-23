@@ -22,6 +22,16 @@ def ensure_score_alignment(ctx: ExecutionContext, node: WorkflowNode, structures
         )
 
 
+def _score_value(score: dict, metric: str, default: float) -> float:
+    value = score.get(metric, default)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 async def filter_by_score(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:
     structures = inputs["structures"]
     score_payload = inputs["score"]
@@ -33,13 +43,13 @@ async def filter_by_score(ctx: ExecutionContext, node: WorkflowNode, inputs: dic
 
     indexed = list(enumerate(scores))
     if mode == "Is largest top":
-        keep = {index for index, _ in sorted(indexed, key=lambda item: float(item[1].get(metric, float("-inf"))), reverse=True)[: int(threshold)]}
+        keep = {index for index, _ in sorted(indexed, key=lambda item: _score_value(item[1], metric, float("-inf")), reverse=True)[: int(threshold)]}
     elif mode == "Is smallest top":
-        keep = {index for index, _ in sorted(indexed, key=lambda item: float(item[1].get(metric, float("inf"))))[: int(threshold)]}
+        keep = {index for index, _ in sorted(indexed, key=lambda item: _score_value(item[1], metric, float("inf")))[: int(threshold)]}
     elif mode == "Higher than":
-        keep = {index for index, score in indexed if float(score.get(metric, float("-inf"))) > threshold}
+        keep = {index for index, score in indexed if _score_value(score, metric, float("-inf")) > threshold}
     else:
-        keep = {index for index, score in indexed if float(score.get(metric, float("inf"))) < threshold}
+        keep = {index for index, score in indexed if _score_value(score, metric, float("inf")) < threshold}
 
     out_dir = node_dir(ctx, node)
     filtered_artifacts = []
@@ -56,7 +66,7 @@ async def filter_by_score(ctx: ExecutionContext, node: WorkflowNode, inputs: dic
     csv_artifact = await ctx.write_csv_artifact(node, out_dir / "scores.csv", scores_to_rows(filtered_scores), "Score")
     return {
         "structures": payload_from_artifacts(structures.type_name, filtered_artifacts, data=filtered_structures, metadata=structures.metadata),
-        "score": payload_from_artifacts("Score", [json_artifact, csv_artifact], data=filtered_scores, metadata={"score_count": len(filtered_scores)}),
+        "score": payload_from_artifacts("Score", [json_artifact, csv_artifact], data=filtered_scores, metadata={"score_count": len(filtered_scores)}, item_count=len(filtered_scores)),
     }
 
 
@@ -79,5 +89,5 @@ async def filter_by_ligand(ctx: ExecutionContext, node: WorkflowNode, inputs: di
         kept_scores = [scores.data[index] for index in keep]
         json_artifact = await ctx.write_json_artifact(node, out_dir / "scores.json", kept_scores, "Score", item_count=len(kept_scores))
         csv_artifact = await ctx.write_csv_artifact(node, out_dir / "scores.csv", scores_to_rows(kept_scores), "Score")
-        result["score"] = payload_from_artifacts("Score", [json_artifact, csv_artifact], data=kept_scores)
+        result["score"] = payload_from_artifacts("Score", [json_artifact, csv_artifact], data=kept_scores, item_count=len(kept_scores))
     return result

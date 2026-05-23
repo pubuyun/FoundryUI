@@ -41,6 +41,9 @@ class TypedPayload(BaseModel):
         residue_names = metadata.get("residue_names")
         if type_name == "Ligand" and isinstance(residue_names, list) and residue_names:
             metadata["residue_name"] = residue_names[0]
+        smiles_list = metadata.get("smiles_list")
+        if type_name == "Ligand" and isinstance(smiles_list, list) and smiles_list:
+            metadata["smiles"] = smiles_list[0]
         return TypedPayload(
             type_name=type_name,
             item_count=1 if data is not None else 0,

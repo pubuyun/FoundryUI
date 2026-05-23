@@ -58,5 +58,5 @@ async def binary_logic(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[s
         if len(scores) == len(selected):
             json_artifact = await ctx.write_json_artifact(node, out_dir / "scores.json", scores, "Score", item_count=len(scores))
             csv_artifact = await ctx.write_csv_artifact(node, out_dir / "scores.csv", scores_to_rows(scores), "Score")
-            result["score"] = payload_from_artifacts("Score", [json_artifact, csv_artifact], data=scores)
+            result["score"] = payload_from_artifacts("Score", [json_artifact, csv_artifact], data=scores, item_count=len(scores))
     return result

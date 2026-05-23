@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.bio.fasta import parse_fasta, write_fasta
-from backend.bio.ligand import sdf_to_pdb, smiles_to_pdb, validate_sdf
+from backend.bio.ligand import pdb_to_smiles, sdf_to_pdb, sdf_to_smiles, smiles_to_pdb, validate_sdf
 from backend.bio.pdb import first_residue_name, rename_residue, validate_pdb
 from backend.nodes.common import ExecutionContext, embedded_or_stored_uploads, node_dir, option, payload_from_artifacts
 from backend.schemas.errors import BackendError, make_error
@@ -22,34 +22,37 @@ async def ligand_input(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[s
         residue_name = ctx.next_ligand_residue_name()
         pdb = rename_residue(pdb, residue_name)
         artifact = await ctx.write_text_artifact(node, out_dir / "ligand.pdb", pdb, "Ligand", "chemical/x-pdb")
-        return {"ligand": payload_from_artifacts("Ligand", [artifact], data=pdb, metadata={"residue_name": residue_name, "residue_names": [residue_name], "renamed_residue": True})}
+        return {"ligand": payload_from_artifacts("Ligand", [artifact], data=pdb, metadata={"residue_name": residue_name, "residue_names": [residue_name], "smiles": smiles, "smiles_list": [smiles], "renamed_residue": True})}
     else:
         uploads = embedded_or_stored_uploads(ctx, node)
         if not uploads:
             raise BackendError(make_error("MISSING_LIGAND_FILE", "LigandInput requires an uploaded PDB or SDF file.", run_id=ctx.run_id, node_id=node.id, node_type=node.type, option_key="file"))
         pdbs: list[str] = []
+        smiles_values: list[str] = []
         for name, file_type, content in uploads:
             detected = (file_type or Path(name).suffix.lower().lstrip(".")).lower()
             if detected == "sdf":
                 validate_sdf(content)
                 pdbs.append(sdf_to_pdb(content))
+                smiles_values.append(sdf_to_smiles(content))
             elif detected == "pdb":
                 validate_pdb(content)
                 pdbs.append(content)
+                smiles_values.append(pdb_to_smiles(content))
             else:
                 raise BackendError(make_error("INVALID_LIGAND_FILE_TYPE", "LigandInput accepts PDB or SDF files.", run_id=ctx.run_id, node_id=node.id, node_type=node.type, option_key="file", details={"file": name}))
         if len(pdbs) == 1:
             residue_name = ctx.next_ligand_residue_name()
             pdb = rename_residue(pdbs[0], residue_name)
             artifact = await ctx.write_text_artifact(node, out_dir / "ligand.pdb", pdb, "Ligand", "chemical/x-pdb")
-            return {"ligand": payload_from_artifacts("Ligand", [artifact], data=pdb, metadata={"residue_name": residue_name, "residue_names": [residue_name], "renamed_residue": True})}
+            return {"ligand": payload_from_artifacts("Ligand", [artifact], data=pdb, metadata={"residue_name": residue_name, "residue_names": [residue_name], "smiles": smiles_values[0], "smiles_list": smiles_values[:1], "renamed_residue": True})}
 
         artifacts = []
         residue_names = [first_residue_name(pdb) for pdb in pdbs]
         for index, pdb in enumerate(pdbs, start=1):
             artifact = await ctx.write_text_artifact(node, out_dir / f"ligand_{index:04d}.pdb", pdb, "Batch Ligand", "chemical/x-pdb")
             artifacts.append(artifact)
-        return {"ligand": payload_from_artifacts("Batch Ligand", artifacts, data=pdbs, metadata={"residue_names": residue_names, "renamed_residue": False})}
+        return {"ligand": payload_from_artifacts("Batch Ligand", artifacts, data=pdbs, metadata={"residue_names": residue_names, "smiles_list": smiles_values, "renamed_residue": False})}
 
 
 async def protein_input(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:

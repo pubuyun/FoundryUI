@@ -33,6 +33,42 @@ def smiles_to_pdb(smiles: str) -> str:
     return Chem.MolToPDBBlock(mol)
 
 
+def pdb_to_smiles(content: str) -> str:
+    if Chem is None:
+        raise ValueError("RDKit is required to convert ligand PDB to SMILES.")
+    mol = Chem.MolFromPDBBlock(content, sanitize=True, removeHs=False)
+    if mol is None:
+        mol = Chem.MolFromPDBBlock(content, sanitize=False, removeHs=False)
+    if mol is None:
+        raise ValueError("Ligand PDB is not parseable by RDKit.")
+    try:
+        Chem.SanitizeMol(mol)
+    except Exception:
+        pass
+    mol = Chem.RemoveHs(mol, sanitize=False)
+    smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
+    if not smiles:
+        raise ValueError("RDKit could not generate SMILES from ligand PDB.")
+    return smiles
+
+
+def sdf_to_smiles(content: str) -> str:
+    if Chem is None:
+        raise ValueError("RDKit is required to convert SDF to SMILES.")
+    tmp = Path("/tmp/foundryui-upload-smiles.sdf")
+    tmp.write_text(content)
+    supplier = Chem.SDMolSupplier(str(tmp), sanitize=True, removeHs=False)
+    mol = next((candidate for candidate in supplier if candidate is not None), None)
+    tmp.unlink(missing_ok=True)
+    if mol is None:
+        raise ValueError("SDF contains no valid molecules.")
+    mol = Chem.RemoveHs(mol, sanitize=False)
+    smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
+    if not smiles:
+        raise ValueError("RDKit could not generate SMILES from SDF.")
+    return smiles
+
+
 def sdf_to_pdb(content: str) -> str:
     if Chem is None:
         raise ValueError("RDKit is required to convert SDF to PDB.")

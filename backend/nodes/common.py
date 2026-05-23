@@ -82,10 +82,10 @@ def split_selector(value: Any) -> list[str]:
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
-def payload_from_artifacts(type_name: str, artifacts: list[ArtifactMetadata], data: Any = None, metadata: dict[str, Any] | None = None) -> TypedPayload:
+def payload_from_artifacts(type_name: str, artifacts: list[ArtifactMetadata], data: Any = None, metadata: dict[str, Any] | None = None, item_count: int | None = None) -> TypedPayload:
     return TypedPayload(
         type_name=type_name,
-        item_count=len(artifacts),
+        item_count=len(artifacts) if item_count is None else item_count,
         artifact_ids=[artifact.artifact_id for artifact in artifacts],
         paths=[artifact.path for artifact in artifacts],
         metadata=metadata or {},
