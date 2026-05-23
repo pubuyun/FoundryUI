@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Any
+
+from backend.schemas.artifacts import ArtifactMetadata
+from backend.schemas.errors import StructuredError
+from backend.schemas.events import RunEvent, RunStatus
+
+
+@dataclass
+class RunRecord:
+    run_id: str
+    state: str = "queued"
+    current_node_id: str | None = None
+    current_node_type: str | None = None
+    completed_nodes: int = 0
+    total_nodes: int = 0
+    recent_output: deque[str] = field(default_factory=lambda: deque(maxlen=200))
+    warnings: list[StructuredError] = field(default_factory=list)
+    errors: list[StructuredError] = field(default_factory=list)
+    artifacts: list[ArtifactMetadata] = field(default_factory=list)
+    events: list[RunEvent] = field(default_factory=list)
+    subscribers: list[asyncio.Queue[RunEvent]] = field(default_factory=list)
+    request: Any = None
+
+    @property
+    def progress_percent(self) -> float:
+        if self.total_nodes <= 0:
+            return 0
+        return round((self.completed_nodes / self.total_nodes) * 100, 2)
+
+
+class RunRegistry:
+    def __init__(self):
+        self.records: dict[str, RunRecord] = {}
+        self._lock = asyncio.Lock()
+
+    async def create(self, run_id: str, total_nodes: int, request: Any = None) -> RunRecord:
+        async with self._lock:
+            record = RunRecord(run_id=run_id, total_nodes=total_nodes, request=request)
+            self.records[run_id] = record
+        await self.publish(RunEvent(event="queued", run_id=run_id, message="Run queued."))
+        return record
+
+    def get(self, run_id: str) -> RunRecord | None:
+        return self.records.get(run_id)
+
+    def status(self, run_id: str) -> RunStatus | None:
+        record = self.get(run_id)
+        if record is None:
+            return None
+        return RunStatus(
+            run_id=run_id,
+            state=record.state,
+            current_node_id=record.current_node_id,
+            current_node_type=record.current_node_type,
+            completed_nodes=record.completed_nodes,
+            total_nodes=record.total_nodes,
+            progress_percent=record.progress_percent,
+            recent_output=list(record.recent_output),
+            warnings=[warning.model_dump() for warning in record.warnings],
+            errors=[error.model_dump() for error in record.errors],
+        )
+
+    async def publish(self, event: RunEvent) -> None:
+        record = self.records.get(event.run_id)
+        if record is None:
+            return
+        event.sequence = len(record.events) + 1
+        record.events.append(event)
+        if event.event in {"stdout", "stderr"} and event.message:
+            record.recent_output.append(f"{event.event}: {event.message}")
+        if event.event == "artifact_created":
+            artifact = event.data.get("artifact")
+            if artifact:
+                try:
+                    record.artifacts.append(ArtifactMetadata.model_validate(artifact))
+                except Exception:
+                    pass
+        for subscriber in list(record.subscribers):
+            await subscriber.put(event)
+
+    async def set_started(self, run_id: str) -> None:
+        record = self.records[run_id]
+        record.state = "running"
+        await self.publish(RunEvent(event="started", run_id=run_id, message="Run started."))
+
+    async def set_node_started(self, run_id: str, node_id: str, node_type: str) -> None:
+        record = self.records[run_id]
+        record.current_node_id = node_id
+        record.current_node_type = node_type
+        await self.publish(RunEvent(event="node_started", run_id=run_id, node_id=node_id, node_type=node_type))
+
+    async def set_node_completed(self, run_id: str, node_id: str, node_type: str) -> None:
+        record = self.records[run_id]
+        record.completed_nodes += 1
+        await self.publish(
+            RunEvent(
+                event="node_completed",
+                run_id=run_id,
+                node_id=node_id,
+                node_type=node_type,
+                data={"completed_nodes": record.completed_nodes, "total_nodes": record.total_nodes},
+            )
+        )
+
+    async def add_error(self, run_id: str, error: StructuredError) -> None:
+        record = self.records[run_id]
+        record.errors.append(error)
+        record.state = "failed"
+        await self.publish(RunEvent(event="error", run_id=run_id, node_id=error.node_id, node_type=error.node_type, message=error.message, data={"error": error.model_dump()}))
+
+    async def add_warning(self, run_id: str, warning: StructuredError) -> None:
+        record = self.records[run_id]
+        record.warnings.append(warning)
+        await self.publish(RunEvent(event="warning", run_id=run_id, node_id=warning.node_id, node_type=warning.node_type, message=warning.message, data={"warning": warning.model_dump()}))
+
+    async def complete(self, run_id: str) -> None:
+        record = self.records[run_id]
+        record.state = "completed"
+        record.current_node_id = None
+        record.current_node_type = None
+        await self.publish(RunEvent(event="completed", run_id=run_id, message="Run completed."))
+
+    async def subscribe(self, run_id: str) -> asyncio.Queue[RunEvent] | None:
+        record = self.records.get(run_id)
+        if record is None:
+            return None
+        queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+        for event in record.events:
+            await queue.put(event)
+        record.subscribers.append(queue)
+        return queue
+
+    def unsubscribe(self, run_id: str, queue: asyncio.Queue[RunEvent]) -> None:
+        record = self.records.get(run_id)
+        if record and queue in record.subscribers:
+            record.subscribers.remove(queue)
+
+
+run_registry = RunRegistry()

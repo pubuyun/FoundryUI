@@ -1,0 +1,9 @@
+- **Ligand** – 小分子配体 pdb
+- **Protein** – 蛋白质 pdb
+- **List of Residues** –  残基列表,如 "A58,A102" 其中A为链名
+- **List of Atoms** – 原子列表, 如 "C1,C2"
+- **Batch Protein** – 批量蛋白质（不含配体）pdb
+- **Batch Ligand** – 批量配体pdb
+- **Batch Protein with Ligand** – 批量蛋白质-配体复合物 pdb
+- **Batch Sequence** – 批量序列（仅序列信息）
+- **Score** – 评分对象（字典的列表, 包含 {pLDDT, length, pTM, interface_PAE*, ipTM*, ranking_score*} 字段, \*表示只在与配体共折叠时有）

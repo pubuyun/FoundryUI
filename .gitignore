@@ -1,0 +1,27 @@
+# JavaScript
+node_modules/
+.nuxt/
+.output/
+npm-debug.log*
+
+# Python
+.venv/
+.python/
+.tools/
+.uv-cache/
+models/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+backend/runs/
+backend/uploads/
+
+# Local tooling
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# External source checkouts
+foundry/

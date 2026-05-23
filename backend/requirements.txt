@@ -1,0 +1,4 @@
+biopython>=1.84
+fastapi[standard]>=0.115
+rdkit>=2025.3,<2025.9
+ryvencore==0.5.0
