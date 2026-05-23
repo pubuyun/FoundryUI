@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from backend.nodes.filters import filter_by_ligand, filter_by_score
+from backend.nodes.filters import filter_chirality, filter_by_score
 from backend.nodes.folding import rosetta_fold
 from backend.nodes.generation import rfdiffusion_smbinder
 from backend.nodes.inputs import ligand_input, protein_input, sequence_input
 from backend.nodes.logic import binary_logic
 from backend.nodes.mpnn import ligand_mpnn, protein_mpnn
-from backend.nodes.save import save_ligands, save_proteins_with_scores, save_sequences
+from backend.nodes.save import save_ligands, save_proteins, save_proteins_with_scores, save_sequences
 from backend.nodes.selectors import atom_selector, residue_selector
 from backend.nodes.utils import merge, protein_to_seq, split
 from backend.nodes.viewers import pdb_viewer, sequence_viewer
@@ -36,7 +36,7 @@ HANDLERS = {
     "RosettaFold": rosetta_fold,
     "RosettaFold3": rosetta_fold,
     "FilterByScore": filter_by_score,
-    "FilterByLigand": filter_by_ligand,
+    "FilterChirality": filter_chirality,
     "BinaryLogic": binary_logic,
     "Protein2Seq": protein_to_seq,
     "Merge": merge,
@@ -44,6 +44,7 @@ HANDLERS = {
     "PDBViewer": pdb_viewer,
     "SequenceViewer": sequence_viewer,
     "SaveProteinsWithScores": save_proteins_with_scores,
+    "SaveProteins": save_proteins,
     "SaveSequences": save_sequences,
     "SaveLigands": save_ligands,
     "StringPrimitive": primitive_value,

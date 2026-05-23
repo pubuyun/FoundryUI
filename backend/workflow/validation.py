@@ -7,6 +7,10 @@ from backend.workflow.graph import has_cycle, inbound_connections
 from backend.workflow.type_conversions import is_assignable
 
 
+def _is_batch_type(type_name: str | None) -> bool:
+    return bool(type_name and type_name.startswith("Batch "))
+
+
 def _option_value(node_options: dict, key: str, default):
     return node_options[key] if key in node_options else default
 
@@ -112,8 +116,10 @@ def validate_workflow(graph: WorkflowGraph) -> list[StructuredError]:
                     )
 
     inbound = inbound_connections(graph)
+    inbound_counts: dict[tuple[str, str], int] = {}
     node_by_id = {node.id: node for node in graph.nodes}
     for conn in graph.connections:
+        inbound_counts[(conn.to.nodeId, conn.to.key)] = inbound_counts.get((conn.to.nodeId, conn.to.key), 0) + 1
         if conn.from_.nodeId not in node_ids:
             errors.append(make_error("UNKNOWN_SOURCE_NODE", "Connection references an unknown source node.", details=conn.model_dump(by_alias=True)))
             continue
@@ -162,6 +168,27 @@ def validate_workflow(graph: WorkflowGraph) -> list[StructuredError]:
                     details={"source_type": source_port.type_name, "target_type": target_port.type_name},
                 )
             )
+
+    for node in graph.nodes:
+        spec = spec_for(node.type)
+        if spec is None:
+            continue
+        for key, count in inbound_counts.items():
+            node_id, input_key = key
+            if node_id != node.id or count <= 1:
+                continue
+            port = spec.inputs.get(input_key)
+            if port is not None and not _is_batch_type(port.type_name):
+                errors.append(
+                    make_error(
+                        "MULTIPLE_CONNECTIONS_TO_NON_BATCH_INPUT",
+                        f"Input port {input_key!r} can only receive one connection.",
+                        node_id=node.id,
+                        node_type=node.type,
+                        interface_key=input_key,
+                        details={"connection_count": count, "target_type": port.type_name},
+                    )
+                )
 
     for node in graph.nodes:
         spec = spec_for(node.type)

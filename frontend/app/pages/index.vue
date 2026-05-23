@@ -12,8 +12,6 @@ import {
   TextareaInputInterface,
   TextInputInterface,
   defineNode,
-  getDomElements,
-  getPortCoordinates,
   setNodePosition,
   useBaklava,
 } from "baklavajs";
@@ -32,7 +30,7 @@ import {
 
 interface UploadedStructure {
   name: string;
-  type: "pdb" | "sdf" | "fasta" | "unknown";
+  type: "pdb" | "fasta" | "unknown";
   content: string;
 }
 
@@ -115,11 +113,13 @@ const artifacts = ref<BackendArtifact[]>([]);
 const savedArtifacts = ref<BackendArtifact[]>([]);
 const outputs = ref<BackendOutput[]>([]);
 const errorNodeIds = ref(new Set<string>());
+const cachedNodeIds = ref(new Set<string>());
 const eventSource = ref<EventSource | null>(null);
 const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : runState.value.toUpperCase()));
 const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
 const viewerEl = ref<HTMLElement | null>(null);
 const workflowFileInput = ref<HTMLInputElement | null>(null);
+const viewerRuntimeFiles = ref<UploadedStructure[]>([]);
 const viewerModal = reactive<ViewerModal>({
   open: false,
   nodeId: "",
@@ -136,39 +136,6 @@ const runSteps = reactive([
 ]);
 let viewer: any;
 
-const SmilesTextControl = markRaw(
-  defineComponent({
-    name: "SmilesTextControl",
-    props: {
-      intf: { type: Object, required: true },
-      node: { type: Object, required: true },
-    },
-    setup(props) {
-      const sourceValue = computed(() => String((props.node as any).inputs?.source?.value ?? ""));
-      const value = computed({
-        get: () => String((props.intf as NodeInterfaceTypeBase<string>).value ?? ""),
-        set: (next) => {
-          (props.intf as NodeInterfaceTypeBase<string>).value = next;
-        },
-      });
-
-      return () =>
-        sourceValue.value === "SMILES"
-          ? h("label", { class: "node-text-control" }, [
-              h("span", (props.intf as NodeInterfaceTypeBase).name),
-              h("input", {
-                value: value.value,
-                spellcheck: "false",
-                onInput: (event: Event) => {
-                  value.value = (event.target as HTMLInputElement).value;
-                },
-              }),
-            ])
-          : null;
-    },
-  }),
-);
-
 const FileUploadControl = markRaw(
   defineComponent({
     name: "FileUploadControl",
@@ -178,12 +145,6 @@ const FileUploadControl = markRaw(
     },
     setup(props) {
       const status = ref("");
-      const sourceValue = computed(() => String((props.node as any).inputs?.source?.value ?? ""));
-      const shouldShow = computed(() => {
-        const nodeType = (props.node as AbstractNode).type;
-        return nodeType !== "LigandInput" || sourceValue.value === "PDB" || sourceValue.value === "SDF";
-      });
-
       async function onChange(event: Event) {
         const input = event.target as HTMLInputElement;
         const files = [...(input.files ?? [])];
@@ -200,8 +161,7 @@ const FileUploadControl = markRaw(
       }
 
       return () =>
-        shouldShow.value
-          ? h("label", { class: "node-file-upload" }, [
+        h("label", { class: "node-file-upload" }, [
               h("span", (props.intf as NodeInterfaceTypeBase).name),
               h("input", {
                 type: "file",
@@ -211,7 +171,6 @@ const FileUploadControl = markRaw(
               }),
               status.value ? h("small", status.value) : null,
             ])
-          : null;
     },
   }),
 );
@@ -228,15 +187,8 @@ const ViewerButtonControl = markRaw(
         const node = props.node as AbstractNode;
         openViewer(node.id, node.title, (props.intf as any).viewerMode ?? "structure");
       }
-      const sourceValue = computed(() => String((props.node as any).inputs?.source?.value ?? ""));
-      const shouldShow = computed(() => {
-        const nodeType = (props.node as AbstractNode).type;
-        return nodeType !== "LigandInput" || sourceValue.value === "PDB" || sourceValue.value === "SDF";
-      });
-
       return () =>
-        shouldShow.value
-          ? h(
+        h(
               "button",
               {
                 class: "node-viewer-button",
@@ -245,8 +197,7 @@ const ViewerButtonControl = markRaw(
                 onClick: open,
               },
               [(props.intf as NodeInterfaceTypeBase).name],
-            )
-          : null;
+            );
     },
   }),
 );
@@ -254,14 +205,16 @@ const ViewerButtonControl = markRaw(
 function detectStructureType(fileName: string): UploadedStructure["type"] {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".pdb")) return "pdb";
-  if (lower.endsWith(".sdf")) return "sdf";
   if (lower.endsWith(".fasta") || lower.endsWith(".fa")) return "fasta";
   return "unknown";
 }
 
-function createPortInterface(port: PortSpec) {
+function createPortInterface(port: PortSpec, isInput = false) {
   const intf = new NodeInterface(port.optional ? `${port.label}*` : port.label, null);
   intf.setPort(true);
+  if (isInput && port.type.startsWith("Batch ")) {
+    (intf as any).allowMultipleConnections = true;
+  }
   applyPortType(intf, port.type);
   return intf;
 }
@@ -271,10 +224,7 @@ function createOptionInterface(option: OptionSpec) {
   if (option.kind === "textarea") {
     intf = new TextareaInputInterface(option.label, String(option.value));
   } else if (option.kind === "text") {
-    intf =
-      option.key === "smiles"
-        ? new NodeInterface(option.label, String(option.value)).setComponent(SmilesTextControl)
-        : new TextInputInterface(option.label, String(option.value));
+    intf = new TextInputInterface(option.label, String(option.value));
   } else if (option.kind === "int") {
     intf = new IntegerInterface(option.label, Number(option.value), option.min, option.max);
   } else if (option.kind === "float") {
@@ -306,10 +256,10 @@ function createFoundryNode(spec: FoundryNodeSpec) {
     type: spec.type,
     title: spec.title,
     inputs: Object.fromEntries([
-      ...(spec.inputs ?? []).map((input) => [input.key, () => createPortInterface(input)]),
+      ...(spec.inputs ?? []).map((input) => [input.key, () => createPortInterface(input, true)]),
       ...(spec.options ?? []).map((option) => [option.key, () => createOptionInterface(option)]),
     ]),
-    outputs: Object.fromEntries((spec.outputs ?? []).map((output) => [output.key, () => createPortInterface(output)])),
+    outputs: Object.fromEntries((spec.outputs ?? []).map((output) => [output.key, () => createPortInterface(output, false)])),
   });
 }
 
@@ -322,8 +272,8 @@ function registerTypes() {
 
   typeRegistry.get("Protein")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Ligand")?.addConversion(typeRegistry.get("Batch Ligand")!, (value) => value);
-  typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Batch Structure")!, (value) => value);
-  typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Batch Structure")!, (value) => value);
+  typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
+  typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
   typeRegistry.get("Batch Ligand")?.addConversion(typeRegistry.get("Ligand")!, (value) => value);
   typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Protein")!, (value) => value);
 
@@ -784,6 +734,7 @@ function handleRunEvent(event: RunEventPayload) {
     if (event.node_id) clearNodeError(event.node_id);
   } else if (event.event === "node_completed") {
     runMessage.value = `${event.node_type ?? "Node"} completed`;
+    if (event.node_id && event.data?.cached) markNodeCached(event.node_id);
     void refreshRunStatus(event.run_id);
     void loadOutputs(event.run_id);
   } else if (event.event === "artifact_created") {
@@ -833,33 +784,6 @@ function archiveUrl() {
   return currentRunId.value ? `${apiBase.value}/api/runs/${currentRunId.value}/archive` : "#";
 }
 
-function outputForConnection(connection: Connection) {
-  const fromNode = baklava.editor.graph.findNodeById(connection.from.nodeId);
-  if (!fromNode) return undefined;
-  const outputKey = interfaceKey(fromNode, connection.from);
-  return outputs.value.find((output) => output.node_id === fromNode.id && output.output_key === outputKey);
-}
-
-function hasOutputForConnection(connection: Connection) {
-  return Boolean(outputForConnection(connection));
-}
-
-function outputDownloadUrlForConnection(connection: Connection) {
-  const output = outputForConnection(connection);
-  if (!output || !currentRunId.value) return "#";
-  return `${apiBase.value}/api/runs/${currentRunId.value}/outputs/${encodeURIComponent(output.node_id)}/${encodeURIComponent(output.output_key)}/download`;
-}
-
-function connectionCenter(connection: Connection) {
-  try {
-    const from = getPortCoordinates(getDomElements(connection.from));
-    const to = getPortCoordinates(getDomElements(connection.to));
-    return { x: (from[0] + to[0]) / 2, y: (from[1] + to[1]) / 2 };
-  } catch {
-    return { x: 0, y: 0 };
-  }
-}
-
 function markNodeError(nodeId: string) {
   const next = new Set(errorNodeIds.value);
   next.add(nodeId);
@@ -873,12 +797,20 @@ function clearNodeError(nodeId: string) {
   errorNodeIds.value = next;
 }
 
-function openViewer(nodeId: string, title: string, mode: ViewerModal["mode"]) {
+function markNodeCached(nodeId: string) {
+  const next = new Set(cachedNodeIds.value);
+  next.add(nodeId);
+  cachedNodeIds.value = next;
+}
+
+async function openViewer(nodeId: string, title: string, mode: ViewerModal["mode"]) {
   viewerModal.open = true;
   viewerModal.nodeId = nodeId;
   viewerModal.title = title;
   viewerModal.mode = mode;
   viewerModal.fileIndex = 0;
+  viewerRuntimeFiles.value = [];
+  await loadViewerRuntimeFiles(nodeId);
   void nextTick(initializeViewer);
 }
 
@@ -892,7 +824,34 @@ function connectedSourceNode(node: AbstractNode) {
   return connection ? baklava.editor.graph.findNodeById(connection.from.nodeId) : undefined;
 }
 
+function connectedSourceOutput(node: AbstractNode) {
+  const inputInterfaces = new Set(Object.values(node.inputs));
+  const connection = baklava.editor.graph.connections.find((conn) => inputInterfaces.has(conn.to));
+  if (!connection) return undefined;
+  const source = baklava.editor.graph.findNodeById(connection.from.nodeId);
+  if (!source) return undefined;
+  return outputs.value.find((output) => output.node_id === source.id && output.output_key === interfaceKey(source, connection.from));
+}
+
+async function loadViewerRuntimeFiles(nodeId: string) {
+  const node = baklava.editor.graph.findNodeById(nodeId);
+  if (!node || node.type !== "PDBViewer") return;
+  const output = connectedSourceOutput(node);
+  if (!output?.artifact_ids.length) return;
+  const artifactById = new Map(artifacts.value.map((artifact) => [artifact.artifact_id, artifact]));
+  const files: UploadedStructure[] = [];
+  for (const artifactId of output.artifact_ids) {
+    const artifact = artifactById.get(artifactId);
+    if (!artifact || artifact.media_type !== "chemical/x-pdb") continue;
+    const response = await fetch(artifactUrl(artifact));
+    if (!response.ok) continue;
+    files.push({ name: artifact.path.split("/").pop() || artifact.path, type: "pdb", content: await response.text() });
+  }
+  viewerRuntimeFiles.value = files;
+}
+
 function structuresForNodeId(nodeId: string, seen = new Set<string>()): UploadedStructure[] {
+  if (viewerRuntimeFiles.value.length) return viewerRuntimeFiles.value;
   if (seen.has(nodeId)) return [];
   seen.add(nodeId);
   const ownFiles = uploadedByNode[nodeId];
@@ -903,6 +862,7 @@ function structuresForNodeId(nodeId: string, seen = new Set<string>()): Uploaded
     const upstreamFiles = structuresForNodeId(upstream.id, seen);
     if (upstreamFiles.length) return upstreamFiles;
   }
+  if (node?.type === "PDBViewer") return [];
   return [{ name: "example_complex.pdb", type: "pdb", content: proteinExample }];
 }
 
@@ -924,7 +884,7 @@ function renderViewer() {
     viewer.render();
     return;
   }
-  viewer.addModel(file.content || proteinExample, file.type === "sdf" ? "sdf" : "pdb");
+  viewer.addModel(file.content || proteinExample, "pdb");
   if (viewerModal.style === "stick" || viewerModal.mode === "atom") {
     viewer.setStyle({}, { stick: { radius: 0.18 } });
   } else if (viewerModal.style === "surface") {
@@ -972,19 +932,14 @@ baklava.hooks.renderInterface.subscribe("foundry-colors", ({ intf, el }) => {
     el.dataset.interfaceType = type;
     el.style.setProperty("--foundry-port-color", portColor(type));
   }
-  const node = baklava.editor.graph.findNodeById(intf.nodeId);
-  const source = String((node as any)?.inputs?.source?.value ?? "");
-  if (node?.type === "LigandInput" && intf.name === "SMILES") {
-    el.style.display = source === "SMILES" ? "" : "none";
-  } else {
-    el.style.removeProperty("display");
-  }
+  el.style.removeProperty("display");
   return { intf, el };
 });
 
 baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
   el.style.setProperty("--foundry-node-color", primaryNodeColor(node));
   el.classList.toggle("foundry-node-error", errorNodeIds.value.has(node.id));
+  el.classList.toggle("foundry-node-cached", cachedNodeIds.value.has(node.id));
   return { node, el };
 });
 
@@ -1037,15 +992,6 @@ onBeforeUnmount(() => {
           <template #connection="{ connection }">
             <g class="typed-connection" :style="{ '--connection-color': connectionColor(connection) }">
               <Components.ConnectionWrapper :connection="connection" />
-              <foreignObject
-                v-if="hasOutputForConnection(connection)"
-                :x="connectionCenter(connection).x - 13"
-                :y="connectionCenter(connection).y - 13"
-                width="26"
-                height="26"
-              >
-                <a class="flow-download" :href="outputDownloadUrlForConnection(connection)" title="Download flow data">D</a>
-              </foreignObject>
             </g>
           </template>
         </BaklavaEditor>
@@ -1056,7 +1002,7 @@ onBeforeUnmount(() => {
       <section class="run-panel-section">
         <header>
           <h2>Status</h2>
-          <a v-if="currentRunId && runState === 'completed'" class="archive-link" :href="archiveUrl()">Archive</a>
+          <a v-if="currentRunId && runState === 'completed'" class="archive-link" :href="archiveUrl()">Archive Download</a>
           <span v-else-if="runState === 'failed'" class="error-label">ERROR</span>
           <span v-else-if="runState === 'stopped'" class="stopped-label">STOPPED</span>
         </header>
@@ -1449,25 +1395,13 @@ onBeforeUnmount(() => {
   stroke: var(--connection-color, #6d7681) !important;
 }
 
-.flow-download {
-  display: flex;
-  width: 24px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #b8c7d7;
-  border-radius: 50%;
-  background: #ffffff;
-  color: #176f5d;
-  font-size: 11px;
-  font-weight: 800;
-  text-decoration: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
-}
-
 .baklava-node.foundry-node-error {
   border-top-color: #ff5252 !important;
   box-shadow: 0 0 0 2px rgba(255, 82, 82, 0.75);
+}
+
+.baklava-node.foundry-node-cached {
+  box-shadow: 0 0 0 2px rgba(126, 224, 196, 0.72);
 }
 
 .node-file-upload {

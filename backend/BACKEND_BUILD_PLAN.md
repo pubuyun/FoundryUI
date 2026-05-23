@@ -373,9 +373,9 @@ Scores are lists aligned 1:1 with model batches.
   - Support score keys `pLDDT`, `length`, `pTM`, `interface_PAE`, `ipTM`, and `ranking_score`.
   - Support largest top N, smallest top N, higher than value, and lower than value.
   - Emit filtered structures and filtered scores in the same order.
-- `FilterByLigand`
-  - Accept `Batch Protein with Ligand`, `Ligand`, and optional `Score`.
-  - Support chirality-sensitive or chirality-insensitive matching.
+- `FilterChirality`
+  - Accept `Batch Protein with Ligand` and optional `Score`.
+  - Filter by configured atom/chirality pairs such as `C0:S, C4:R`.
   - Emit filtered complexes and emit score only when score input is connected.
 - `BinaryLogic`
   - Require both structure inputs to have the same effective type.

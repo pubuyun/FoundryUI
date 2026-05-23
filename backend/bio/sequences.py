@@ -11,7 +11,7 @@ def pdb_to_sequence(content: str) -> str:
             continue
         chain = line[21:22].strip()
         resseq = line[22:26].strip()
-        resname = line[17:20].strip().upper().title()
+        resname = line[17:20].strip().upper()
         key = (chain, resseq)
         if key in seen:
             continue

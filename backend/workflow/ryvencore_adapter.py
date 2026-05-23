@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import shutil
+import uuid
 from pathlib import Path
 
 import ryvencore as rc
@@ -46,6 +47,7 @@ class FoundryRyvencoreNode(rc.Node):
     workflow_node: WorkflowNode
     node_spec: NodeSpec
     input_keys: list[str]
+    logical_input_keys: list[str]
     output_keys: list[str]
     exec_context: ExecutionContext
     runtime_loop: asyncio.AbstractEventLoop
@@ -85,6 +87,7 @@ class FoundryRyvencoreNode(rc.Node):
                         self.exec_context.run_id,
                         self.workflow_node.id,
                         self.workflow_node.type,
+                        cached=True,
                     )
                     return cached, cache_key
                 handler = HANDLERS.get(self.workflow_node.type)
@@ -116,7 +119,7 @@ class FoundryRyvencoreNode(rc.Node):
                 self.set_output_val(self.output_keys.index(key), FoundryPayloadData(payload))
 
     def _inputs_ready(self) -> bool:
-        for index, key in enumerate(self.input_keys):
+        for index, key in enumerate(self.logical_input_keys):
             port = self.node_spec.inputs[key]
             data = self.input(index)
             if data is None and (not port.optional or key in self.connected_input_keys):
@@ -125,7 +128,8 @@ class FoundryRyvencoreNode(rc.Node):
 
     def _input_payloads(self) -> dict[str, TypedPayload]:
         payloads: dict[str, TypedPayload] = {}
-        for index, key in enumerate(self.input_keys):
+        grouped: dict[str, list[TypedPayload]] = {}
+        for index, key in enumerate(self.logical_input_keys):
             data = self.input(index)
             if data is None:
                 continue
@@ -138,7 +142,9 @@ class FoundryRyvencoreNode(rc.Node):
                 )
             if self.workflow_node.type in {"Merge", "SaveLigands"} and key == "ligand" and source_payload.type_name == "Batch Ligand":
                 payload = source_payload
-            payloads[key] = payload
+            grouped.setdefault(key, []).append(payload)
+        for key, values in grouped.items():
+            payloads[key] = _combine_payloads(values) if len(values) > 1 else values[0]
         return payloads
 
 
@@ -161,6 +167,10 @@ def execute_ryvencore_workflow(
         flow_nodes: dict[str, FoundryRyvencoreNode] = {}
         update_errors: list[Exception] = []
         connected_inputs = inbound_connections(graph)
+        incoming_counts: dict[tuple[str, str], int] = {}
+        for connection in graph.connections:
+            key = (connection.to.nodeId, connection.to.key)
+            incoming_counts[key] = incoming_counts.get(key, 0) + 1
         for workflow_node in graph.nodes:
             node_spec = spec_for(workflow_node.type)
             if node_spec is None:
@@ -174,7 +184,7 @@ def execute_ryvencore_workflow(
                     )
                 )
             connected_input_keys = {key for node_id, key in connected_inputs if node_id == workflow_node.id}
-            node_class = _node_class_for(workflow_node, node_spec, ctx, runtime_loop, connected_input_keys)
+            node_class = _node_class_for(workflow_node, node_spec, ctx, runtime_loop, connected_input_keys, incoming_counts)
             node_classes[workflow_node.id] = node_class
             session.register_node_type(node_class)
             flow_node = flow.create_node(node_class)
@@ -191,13 +201,18 @@ def execute_ryvencore_workflow(
             flow_nodes[workflow_node.id] = flow_node
             flow_node.update_error.sub(update_errors.append)
 
+        used_input_slots: dict[tuple[str, str], int] = {}
         for connection in graph.connections:
             source = flow_nodes[connection.from_.nodeId]
             target = flow_nodes[connection.to.nodeId]
             source_class = node_classes[connection.from_.nodeId]
             target_class = node_classes[connection.to.nodeId]
             source_index = source_class.output_keys.index(connection.from_.key)
-            target_index = target_class.input_keys.index(connection.to.key)
+            target_slots = target_class.input_slot_indices[connection.to.key]
+            used_key = (connection.to.nodeId, connection.to.key)
+            used_index = used_input_slots.get(used_key, 0)
+            target_index = target_slots[min(used_index, len(target_slots) - 1)]
+            used_input_slots[used_key] = used_index + 1
             created = flow.connect_nodes(source.outputs[source_index], target.inputs[target_index])
             if created is None:
                 raise BackendError(
@@ -242,8 +257,20 @@ def _node_class_for(
     ctx: ExecutionContext,
     runtime_loop: asyncio.AbstractEventLoop,
     connected_input_keys: set[str],
+    incoming_counts: dict[tuple[str, str], int],
 ) -> type[FoundryRyvencoreNode]:
-    input_keys = list(node_spec.inputs.keys())
+    logical_input_keys: list[str] = []
+    input_socket_keys: list[str] = []
+    input_slot_indices: dict[str, list[int]] = {}
+    for key, port in node_spec.inputs.items():
+        count = incoming_counts.get((workflow_node.id, key), 0)
+        socket_count = max(1, count) if port.type_name.startswith("Batch ") else 1
+        input_slot_indices[key] = []
+        for index in range(socket_count):
+            socket_key = key if index == 0 else f"{key}__{index + 1}"
+            input_slot_indices[key].append(len(input_socket_keys))
+            input_socket_keys.append(socket_key)
+            logical_input_keys.append(key)
     output_keys = list(node_spec.outputs.keys())
     safe_id = re.sub(r"\W+", "_", workflow_node.id)
     return type(
@@ -254,14 +281,41 @@ def _node_class_for(
             "title": workflow_node.title or workflow_node.type,
             "workflow_node": workflow_node,
             "node_spec": node_spec,
-            "input_keys": input_keys,
+            "input_keys": input_socket_keys,
+            "logical_input_keys": logical_input_keys,
+            "input_slot_indices": input_slot_indices,
             "output_keys": output_keys,
             "exec_context": ctx,
             "runtime_loop": runtime_loop,
             "connected_input_keys": connected_input_keys,
-            "init_inputs": [rc.NodeInputType(key) for key in input_keys],
+            "init_inputs": [rc.NodeInputType(key) for key in input_socket_keys],
             "init_outputs": [rc.NodeOutputType(key) for key in output_keys],
         },
+    )
+
+
+def _combine_payloads(values: list[TypedPayload]) -> TypedPayload:
+    first = values[0]
+    data = []
+    paths: list[str] = []
+    artifact_ids: list[str] = []
+    for payload in values:
+        if isinstance(payload.data, list):
+            data.extend(payload.data)
+        elif payload.data is not None:
+            data.append(payload.data)
+        paths.extend(payload.paths)
+        artifact_ids.extend(payload.artifact_ids)
+    metadata = dict(first.metadata)
+    metadata["combined_from_types"] = [payload.type_name for payload in values]
+    return first.model_copy(
+        update={
+            "item_count": len(data) if data else sum(payload.item_count for payload in values),
+            "artifact_ids": artifact_ids,
+            "paths": paths,
+            "data": data,
+            "metadata": metadata,
+        }
     )
 
 
@@ -338,4 +392,11 @@ def _cached_destination(ctx: ExecutionContext, node: WorkflowNode, output_key: s
     suffix = "".join(source.suffixes) or ".dat"
     stem = source.name[: -len(suffix)] if suffix and source.name.endswith(suffix) else source.stem
     safe_stem = re.sub(r"\W+", "_", stem).strip("_") or output_key
-    return artifact_store.node_dir(ctx.run_id, node.id, node.type) / f"{safe_stem}_cached_{index:04d}{suffix}"
+    base = artifact_store.node_dir(ctx.run_id, node.id, node.type) / f"{safe_stem}_cached_{index:04d}{suffix}"
+    if not base.exists():
+        return base
+    for attempt in range(2, 1000):
+        candidate = base.with_name(f"{safe_stem}_cached_{index:04d}_{attempt}{suffix}")
+        if not candidate.exists():
+            return candidate
+    return base.with_name(f"{safe_stem}_cached_{index:04d}_{uuid.uuid4().hex}{suffix}")

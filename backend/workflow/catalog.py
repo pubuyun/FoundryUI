@@ -61,8 +61,6 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         "LigandInput",
         options=_options(
             [
-                OptionSpec("source", "select", "SMILES", choices=("SMILES", "PDB", "SDF")),
-                OptionSpec("smiles", "text", ""),
                 OptionSpec("file", "file", ""),
                 OptionSpec("viewer", "viewer", "Open"),
             ]
@@ -96,13 +94,13 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
             ]
         ),
-        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
+        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)")]),
     ),
     "LigandMPNN": NodeSpec(
         "LigandMPNN",
         inputs=_ports(
             [
-                PortSpec("complexes", "Batch Protein with Ligand"),
+                PortSpec("complexes", "Batch Protein (With Ligand)"),
                 PortSpec("residues", "List of Residues", optional=True),
             ]
         ),
@@ -151,7 +149,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 OptionSpec("seed", "int", 42, min_value=0),
             ]
         ),
-        outputs=_ports([PortSpec("structures", "Batch Structure"), PortSpec("score", "Score")]),
+        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
     ),
     "RosettaFold3": NodeSpec(
         "RosettaFold3",
@@ -164,11 +162,11 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 OptionSpec("seed", "int", 42, min_value=0),
             ]
         ),
-        outputs=_ports([PortSpec("structures", "Batch Structure"), PortSpec("score", "Score")]),
+        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
     ),
     "FilterByScore": NodeSpec(
         "FilterByScore",
-        inputs=_ports([PortSpec("structures", "Batch Structure"), PortSpec("score", "Score")]),
+        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
         options=_options(
             [
                 OptionSpec("metric", "select", "pLDDT", choices=("pLDDT", "length", "pTM", "interface_PAE", "ipTM", "ranking_score")),
@@ -176,32 +174,31 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 OptionSpec("threshold", "float", 10),
             ]
         ),
-        outputs=_ports([PortSpec("structures", "Batch Structure"), PortSpec("score", "Score")]),
+        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
     ),
-    "FilterByLigand": NodeSpec(
-        "FilterByLigand",
+    "FilterChirality": NodeSpec(
+        "FilterChirality",
         inputs=_ports(
             [
-                PortSpec("complexes", "Batch Protein with Ligand"),
-                PortSpec("ligand", "Ligand"),
+                PortSpec("complexes", "Batch Protein (With Ligand)"),
                 PortSpec("score", "Score", optional=True),
             ]
         ),
-        options=_options([OptionSpec("ignoreChirality", "bool", True)]),
-        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand"), PortSpec("score", "Score")]),
+        options=_options([OptionSpec("targets", "textarea", "")]),
+        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
     ),
     "BinaryLogic": NodeSpec(
         "BinaryLogic",
         inputs=_ports(
             [
-                PortSpec("structures1", "Batch Structure"),
+                PortSpec("structures1", "Batch Protein (With Ligand)"),
                 PortSpec("score1", "Score", optional=True),
-                PortSpec("structures2", "Batch Structure"),
+                PortSpec("structures2", "Batch Protein (With Ligand)"),
                 PortSpec("score2", "Score", optional=True),
             ]
         ),
         options=_options([OptionSpec("operation", "select", "OR", choices=("OR", "AND", "NOR", "NAND", "XOR"))]),
-        outputs=_ports([PortSpec("structures", "Batch Structure"), PortSpec("score", "Score")]),
+        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
     ),
     "Protein2Seq": NodeSpec(
         "Protein2Seq",
@@ -211,16 +208,16 @@ NODE_CATALOG: dict[str, NodeSpec] = {
     "Merge": NodeSpec(
         "Merge",
         inputs=_ports([PortSpec("ligand", "Ligand"), PortSpec("batchProtein", "Batch Protein")]),
-        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
+        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)")]),
     ),
     "Split": NodeSpec(
         "Split",
-        inputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
+        inputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)")]),
         outputs=_ports([PortSpec("batchLigand", "Batch Ligand"), PortSpec("batchProtein", "Batch Protein")]),
     ),
     "PDBViewer": NodeSpec(
         "PDBViewer",
-        inputs=_ports([PortSpec("structures", "Batch Structure")]),
+        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)")]),
         options=_options([OptionSpec("viewer", "viewer", "Open")]),
         terminal=True,
     ),
@@ -232,7 +229,13 @@ NODE_CATALOG: dict[str, NodeSpec] = {
     ),
     "SaveProteinsWithScores": NodeSpec(
         "SaveProteinsWithScores",
-        inputs=_ports([PortSpec("structures", "Batch Structure"), PortSpec("score", "Score")]),
+        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
+        options=_options([OptionSpec("folder", "text", "outputs/proteins")]),
+        terminal=True,
+    ),
+    "SaveProteins": NodeSpec(
+        "SaveProteins",
+        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)")]),
         options=_options([OptionSpec("folder", "text", "outputs/proteins")]),
         terminal=True,
     ),

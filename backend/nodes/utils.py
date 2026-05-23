@@ -26,10 +26,10 @@ async def merge(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, Typ
     for index, protein in enumerate(proteins, start=1):
         ligand = ligands[min(index - 1, len(ligands) - 1)]
         complex_pdb = merge_pdb(protein, ligand)
-        artifact = await ctx.write_text_artifact(node, out_dir / f"complex_{index:04d}.pdb", complex_pdb, "Batch Protein with Ligand", "chemical/x-pdb")
+        artifact = await ctx.write_text_artifact(node, out_dir / f"complex_{index:04d}.pdb", complex_pdb, "Batch Protein (With Ligand)", "chemical/x-pdb")
         artifacts.append(artifact)
         complexes.append(complex_pdb)
-    return {"complexes": payload_from_artifacts("Batch Protein with Ligand", artifacts, data=complexes)}
+    return {"complexes": payload_from_artifacts("Batch Protein (With Ligand)", artifacts, data=complexes)}
 
 
 async def split(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:

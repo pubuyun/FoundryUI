@@ -12,6 +12,12 @@ The initial environment is split into:
 
 - Node.js 22. Nuxt supports Node.js 20 or newer; this project starts on the installed Node 22 LTS line.
 - Python 3.12 for Foundry and backend code. The setup script bootstraps a local interpreter with `uv` if it is not already available.
+- If you have a cuda error, install pytorch with a different cuda version
+
+```bash
+pip uninstall -y torch torchvision torchaudio
+pip install -U torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
 
 ## Frontend
 

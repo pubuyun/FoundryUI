@@ -61,13 +61,13 @@ Important nodes and backend behavior:
 - `LigandMPNN` / `ProteinMPNN`: input `residues` is interpreted according to option `residueRole`, either `fixed_residues` or `redesigned_residues`. Required options are `number_of_batches` and `batch_size`; defaulted options are `seed=42`, `temperature=0.05`, `bias_AA=""`, and `omit_AA=""`.
 - `RosettaFold3`: inputs `Batch Sequence` and optional `Ligand`; options are `early_stopping_plddt_threshold=0.5`, `diffusion_batch_size=5`, `num_steps=50`, `seed=42`.
 - `FilterByScore`: must filter structures and scores together, preserving aligned order.
-- `FilterByLigand`: must filter complexes and optional score together. If no score input is connected, do not emit a score output.
+- `FilterChirality`: filters complexes by configured atom/chirality pairs such as `C0:S, C4:R`. Optional scores must stay aligned; if no score input is connected, do not emit a score output.
 - `BinaryLogic`: both structure inputs must be the same effective type. Optional scores must stay aligned with their corresponding structures.
 - `Protein2Seq`: extracts sequences from batch protein PDBs.
 - `Merge`: supports merging one ligand into all batch proteins or merging batch ligand conformers with batch proteins.
 - `Split`: emits `Batch Ligand` and `Batch Protein`.
 - `PDBViewer` and `SequenceViewer`: frontend-only display nodes for now; backend can treat them as terminal sinks unless result materialization is required.
-- `SaveProteinsWithScores`: terminal save node. Input `structures` is `Batch Structure`; input `score` is required. Write each structure as a PDB file and write scores as CSV. CSV must include one column that maps each score row to the corresponding PDB filename.
+- `SaveProteinsWithScores`: terminal save node. Input `structures` is `Batch Protein (With Ligand)`; input `score` is required. Write each structure as a PDB file and write scores as CSV. CSV must include one column that maps each score row to the corresponding PDB filename.
 - `SaveSequences`: terminal save node. Input `sequences` is `Batch Sequence`. Write a FASTA file or one FASTA per sequence, depending on backend artifact policy.
 - `SaveLigands`: terminal save node. Input `ligand` accepts `Ligand` and, via conversion, `Batch Ligand`. Write ligand structures as PDB files.
 

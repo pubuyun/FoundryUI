@@ -5,10 +5,9 @@ export type PortType =
   | "List of Atoms"
   | "Batch Protein"
   | "Batch Ligand"
-  | "Batch Protein with Ligand"
+  | "Batch Protein (With Ligand)"
   | "Batch Sequence"
   | "Score"
-  | "Batch Structure"
   | "Any";
 
 export type OptionKind = "text" | "textarea" | "int" | "float" | "bool" | "select" | "file" | "viewer";
@@ -63,29 +62,27 @@ HETATM   18  N1  LIG B   1       1.556  -0.198   0.000  1.00 20.00           N
 END`;
 
 export const typeDetails: Array<{ name: PortType; detail: string }> = [
-  { name: "Ligand", detail: "Single small-molecule PDB/SDF payload" },
+  { name: "Ligand", detail: "Single small-molecule PDB payload" },
   { name: "Protein", detail: "Single protein PDB payload" },
   { name: "List of Residues", detail: 'Residue ids such as "A58,A103"' },
   { name: "List of Atoms", detail: 'Ligand atom ids such as "C1,O2"' },
   { name: "Batch Protein", detail: "Protein model collection" },
   { name: "Batch Ligand", detail: "Ligand conformer collection" },
-  { name: "Batch Protein with Ligand", detail: "Protein-ligand complex collection" },
+  { name: "Batch Protein (With Ligand)", detail: "Protein or protein-ligand complex collection" },
   { name: "Batch Sequence", detail: "Sequence collection from FASTA or design output" },
   { name: "Score", detail: "List of score dictionaries from folding/filtering" },
-  { name: "Batch Structure", detail: "Batch protein or batch protein-ligand complex" },
 ];
 
 export const colorsByType: Record<PortType, string> = {
   Ligand: "#249a86",
   Protein: "#4678d4",
   "List of Residues": "#9062ce",
-  "List of Atoms": "#c47a2c",
+  "List of Atoms": "#e2559b",
   "Batch Protein": "#2368ad",
   "Batch Ligand": "#168b69",
-  "Batch Protein with Ligand": "#c74b67",
+  "Batch Protein (With Ligand)": "#c74b67",
   "Batch Sequence": "#7d8b23",
   Score: "#d28a19",
-  "Batch Structure": "#607185",
   Any: "#6d7681",
 };
 
@@ -125,11 +122,9 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     type: "LigandInput",
     title: "Ligand Input",
     category: "Structure Inputs",
-    description: "Manual ligand input from PDB/SDF upload or SMILES text.",
+    description: "Manual ligand input from PDB upload.",
     options: [
-      { key: "source", label: "Upload File / SMILES", kind: "select", value: "SMILES", items: ["SMILES", "PDB", "SDF"] },
-      { key: "smiles", label: "SMILES", kind: "text", value: "CC(=O)N1CCC(CC1)O" },
-      { key: "file", label: "Upload File", kind: "file", value: "", accept: ".pdb,.sdf" },
+      { key: "file", label: "Upload File", kind: "file", value: "", accept: ".pdb" },
       { key: "viewer", label: "3D Viewer", kind: "viewer", value: "Open", viewerMode: "structure" },
     ],
     outputs: [{ key: "ligand", label: "Ligand", type: "Ligand" }],
@@ -169,7 +164,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "nBatches", label: "n_batches", kind: "int", value: 1, min: 1 },
       { key: "diffusionBatchSize", label: "diffusion_batch_size", kind: "int", value: 5, min: 1 },
     ],
-    outputs: [{ key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" }],
+    outputs: [{ key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" }],
   },
   {
     type: "LigandMPNN",
@@ -177,7 +172,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     category: "MPNN",
     description: "Ligand-aware sequence design for protein-ligand complexes.",
     inputs: [
-      { key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" },
+      { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "residues", label: "List of Residues: fixed/redesigned", type: "List of Residues", optional: true },
     ],
     options: [
@@ -227,7 +222,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "seed", label: "seed", kind: "int", value: 42, min: 0 },
     ],
     outputs: [
-      { key: "structures", label: "Batch Protein with Ligand / Batch Protein", type: "Batch Structure" },
+      { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
   },
@@ -237,7 +232,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     category: "Filter",
     description: "Filter model batches by one score metric, preserving score ordering.",
     inputs: [
-      { key: "structures", label: "Batch Protein with Ligand / Batch Protein", type: "Batch Structure" },
+      { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
     options: [
@@ -246,23 +241,22 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "threshold", label: "top / threshold", kind: "float", value: 10 },
     ],
     outputs: [
-      { key: "structures", label: "Batch Protein with Ligand / Batch Protein", type: "Batch Structure" },
+      { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
   },
   {
-    type: "FilterByLigand",
-    title: "Filter By Ligand",
+    type: "FilterChirality",
+    title: "Filter Chirality",
     category: "Filter",
-    description: "Keep complexes containing the ligand; optional score passthrough.",
+    description: "Keep complexes whose ligand atoms match selected chirality targets.",
     inputs: [
-      { key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" },
-      { key: "ligand", label: "Ligand", type: "Ligand" },
+      { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score", optional: true },
     ],
-    options: [{ key: "ignoreChirality", label: "Ignore Chirality?", kind: "bool", value: true }],
+    options: [{ key: "targets", label: "Atom chirality pairs", kind: "textarea", value: "C0:S" }],
     outputs: [
-      { key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" },
+      { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
   },
@@ -272,14 +266,14 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     category: "Logic",
     description: "Logical operations across two same-type model batches with optional scores.",
     inputs: [
-      { key: "structures1", label: "Batch Protein with Ligand / Batch Protein 1", type: "Batch Structure" },
+      { key: "structures1", label: "Batch Protein (With Ligand) 1", type: "Batch Protein (With Ligand)" },
       { key: "score1", label: "Score1", type: "Score", optional: true },
-      { key: "structures2", label: "Batch Protein with Ligand / Batch Protein 2", type: "Batch Structure" },
+      { key: "structures2", label: "Batch Protein (With Ligand) 2", type: "Batch Protein (With Ligand)" },
       { key: "score2", label: "Score2", type: "Score", optional: true },
     ],
     options: [{ key: "operation", label: "Operation", kind: "select", value: "OR", items: ["OR", "AND", "NOR", "NAND", "XOR"] }],
     outputs: [
-      { key: "structures", label: "Batch Protein with Ligand / Batch Protein", type: "Batch Structure" },
+      { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
   },
@@ -300,14 +294,14 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "ligand", label: "(Batch) Ligand", type: "Ligand" },
       { key: "batchProtein", label: "Batch Protein", type: "Batch Protein" },
     ],
-    outputs: [{ key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" }],
+    outputs: [{ key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" }],
   },
   {
     type: "Split",
     title: "Split",
     category: "Util",
     description: "Split complexes into ligand conformers and proteins.",
-    inputs: [{ key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" }],
+    inputs: [{ key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" }],
     outputs: [
       { key: "batchLigand", label: "Batch Ligand", type: "Batch Ligand" },
       { key: "batchProtein", label: "Batch Protein", type: "Batch Protein" },
@@ -318,7 +312,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     title: "PDB Viewer",
     category: "View",
     description: "Inspect batch protein or protein-ligand structures in a node-local 3D viewer.",
-    inputs: [{ key: "structures", label: "Batch Protein (with Ligand)", type: "Batch Structure" }],
+    inputs: [{ key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" }],
     options: [{ key: "viewer", label: "File Selector + 3D Viewer", kind: "viewer", value: "Open", viewerMode: "batchStructure" }],
   },
   {
@@ -335,9 +329,17 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     category: "Save",
     description: "Save protein PDB files and score CSV with a PDB filename column.",
     inputs: [
-      { key: "structures", label: "Batch Protein (with Ligand)", type: "Batch Structure" },
+      { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
+    options: [{ key: "folder", label: "Folder Selector", kind: "text", value: "outputs/proteins" }],
+  },
+  {
+    type: "SaveProteins",
+    title: "Save Proteins",
+    category: "Save",
+    description: "Save protein PDB files without score CSV.",
+    inputs: [{ key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" }],
     options: [{ key: "folder", label: "Folder Selector", kind: "text", value: "outputs/proteins" }],
   },
   {

@@ -34,7 +34,7 @@ async def rosetta_fold(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[s
     )
     if not structure_paths:
         raise BackendError(make_error("NO_RF3_OUTPUTS", "RosettaFold3 did not produce PDB outputs.", run_id=ctx.run_id, node_id=node.id, node_type=node.type))
-    payload_type = "Batch Protein with Ligand" if ligand_path else "Batch Protein"
+    payload_type = "Batch Protein (With Ligand)" if ligand_path else "Batch Protein"
     artifacts = await copy_paths_as_artifacts(ctx, node, structure_paths, payload_type)
     structures = read_payload_files(ctx, TypedPayload(type_name=payload_type, paths=[artifact.path for artifact in artifacts]))
     if not scores:

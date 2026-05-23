@@ -35,7 +35,7 @@
 #### Input
 - N/A
 #### Options
-- Upload File(pdb/sdf)/SMILES(text)
+- Upload File(pdb)
 - 3D Viewer
 #### Output
 - Ligand
@@ -69,12 +69,12 @@
 - n_batches
 - diffusion_batch_size
 #### Output
-- Batch Protein with Ligand
+- Batch Protein (With Ligand)
 ## MPNN
 ### LigandMPNN
 - LigandMPNN
 #### Input
-- Batch Protein with Ligand
+- Batch Protein (With Ligand)
 - List of Residues (fixed_residues/redesigned_residues*)
 #### Options
 - number_of_batches required
@@ -112,13 +112,13 @@
 - int: num_steps default 50
 - int: seed default 42
 #### Output
-- Batch Protein with Ligand/Batch Protein
+- Batch Protein (With Ligand)/Batch Protein
 - Score
 ## Filter
 ### FilterByScore
-- 根据**一个**分数指标过滤[Batch Protein with Ligand/Batch Protein]
+- 根据**一个**分数指标过滤[Batch Protein (With Ligand)/Batch Protein]
 #### Input
-- Batch Protein with Ligand/Batch Protein
+- Batch Protein (With Ligand)/Batch Protein
 - Score
 #### Options
 - [Specific Score] from {pLDDT, length, pTM, interface_PAE*, ipTM*, ranking_score*}
@@ -127,31 +127,30 @@
 	- Higher than [float]
 	- Lower than [float]
 #### Output
-- Batch Protein with Ligand/Batch Protein
+- Batch Protein (With Ligand)/Batch Protein
 - Score
-### FilterByLigand
-- 留下所有[Batch Protein with Ligand]中含有[Ligand]的，可以设置是否手性敏感
+### FilterChirality
+- 根据选项中指定的Ligand原子名和手性(R/S)过滤[Batch Protein (With Ligand)]；Score可选透传并保持同步
 #### Input
-- Batch Protein with Ligand
-- Ligand
+- Batch Protein (With Ligand)
 - Score*
 #### Options
-- Ignore Chirality?
+- Atom chirality pairs, e.g. `C0:S, C4:R`
 #### Output
-- Batch Protein with Ligand
+- Batch Protein (With Ligand)
 - Score*
 ## Logic
 ### BinaryLogic
 - 对输入的两个Batch Protein (With Ligand)进行逻辑操作
 #### Input
-- Batch Protein with Ligand/Batch Protein1
+- Batch Protein (With Ligand)/Batch Protein1
 - Score1*
-- Batch Protein with Ligand/Batch Protein2 (should be same type to input 1)
+- Batch Protein (With Ligand)/Batch Protein2 (should be same type to input 1)
 - Score2*
 #### Options
 - OR/AND/NOR/NAND/XOR
 #### Output
-- Batch Protein with Ligand/Batch Protein
+- Batch Protein (With Ligand)/Batch Protein
 - Score*
 
 ## Util
@@ -169,11 +168,11 @@
 - Batch Protein
 #### Options
 #### Output
-- Batch Protein with Ligand
+- Batch Protein (With Ligand)
 ### Split
-- 把Batch Protein with Ligand分开，输出Batch Protein和Batch Ligand(不同Ligand构象)
+- 把Batch Protein (With Ligand)分开，输出Batch Protein和Batch Ligand(不同Ligand构象)
 #### Input
-- Batch Protein with Ligand
+- Batch Protein (With Ligand)
 #### Options
 #### Output
 - Batch Ligand
@@ -182,7 +181,7 @@
 ### PDBViewer
 - 用3D Viewer查看Batch Protein
 #### Input
-- Batch Protein (with Ligand)
+- Batch Protein (With Ligand)
 #### Options
 - File Selector + 3D Viewer
 #### Output
@@ -201,8 +200,16 @@
 ### Save Proteins with Scores
 - 把蛋白的pdb跟分数一起保存，分数以csv格式保存，其中有一列跟pdb文件名对应.
 #### Input
-- Batch Protein (with Ligand)
+- Batch Protein (With Ligand)
 - Score
+#### Options
+- Folder Selector
+#### Output
+- N/A
+### Save Proteins
+- 把蛋白的pdb保存为zip，不保存分数.
+#### Input
+- Batch Protein (With Ligand)
 #### Options
 - Folder Selector
 #### Output

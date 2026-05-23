@@ -1,0 +1,1 @@
+- Saves bar should also show sequence saved and ligand saved.

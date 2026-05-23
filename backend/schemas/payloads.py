@@ -13,6 +13,7 @@ PayloadType = Literal[
     "Batch Protein",
     "Batch Ligand",
     "Batch Protein with Ligand",
+    "Batch Protein (With Ligand)",
     "Batch Sequence",
     "Score",
     "Batch Structure",
@@ -29,7 +30,7 @@ class TypedPayload(BaseModel):
     data: Any = None
 
     def as_batch_structure(self) -> "TypedPayload":
-        if self.type_name in {"Batch Protein", "Batch Protein with Ligand", "Batch Structure"}:
+        if self.type_name in {"Batch Protein", "Batch Protein with Ligand", "Batch Protein (With Ligand)", "Batch Structure"}:
             return self.model_copy(update={"type_name": "Batch Structure"})
         return self
 

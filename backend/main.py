@@ -14,7 +14,6 @@ from fastapi.responses import FileResponse, StreamingResponse
 from backend.artifacts.archive import create_run_archive
 from backend.artifacts.registry import artifact_store
 from backend.bio.fasta import parse_fasta
-from backend.bio.ligand import validate_sdf, smiles_to_pdb
 from backend.bio.pdb import validate_pdb
 from backend.runtime.events import sse_encode
 from backend.runtime.queue import QueuedRun, run_queue
@@ -225,7 +224,7 @@ async def download_output(run_id: str, node_id: str, output_key: str):
 async def list_saved_artifacts(run_id: str) -> ArtifactList:
     if run_registry.get(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found.")
-    artifacts = [artifact for artifact in artifact_store.list_run(run_id) if artifact.path.startswith("saves/")]
+    artifacts = [artifact for artifact in artifact_store.list_run(run_id) if artifact.path.startswith("saves/") and artifact.media_type == "application/zip"]
     return ArtifactList(run_id=run_id, artifacts=artifacts)
 
 
@@ -294,8 +293,6 @@ def _detect_type(filename: str) -> str:
     suffix = Path(filename).suffix.lower()
     if suffix == ".pdb":
         return "pdb"
-    if suffix == ".sdf":
-        return "sdf"
     if suffix in {".fasta", ".fa"}:
         return "fasta"
     return "unknown"
@@ -305,12 +302,8 @@ def _validate_upload(file_type: str, content: str) -> None:
     try:
         if file_type == "pdb":
             validate_pdb(content)
-        elif file_type == "sdf":
-            validate_sdf(content)
         elif file_type in {"fasta", "fa"}:
             parse_fasta(content)
-        elif file_type == "smiles":
-            smiles_to_pdb(content.strip())
         else:
             raise ValueError("Unsupported upload type.")
     except ValueError as exc:
@@ -324,12 +317,8 @@ def _validate_run_uploads(request: RunCreateRequest):
     uploads = request.embedded_uploads()
     for node in graph.nodes:
         if node.type == "LigandInput":
-            source = str(node.options.get("source", "SMILES")).upper()
-            if source == "SMILES":
-                if not str(node.options.get("smiles", "")).strip():
-                    errors.append(make_error("MISSING_LIGAND_SMILES", "LigandInput requires SMILES text.", node_id=node.id, node_type=node.type, option_key="smiles"))
-            elif not uploads.get(node.id) and not _has_stored_file_refs(str(node.options.get("file", ""))):
-                errors.append(make_error("MISSING_LIGAND_FILE", "LigandInput requires uploaded PDB/SDF content or upload file ids.", node_id=node.id, node_type=node.type, option_key="file"))
+            if not uploads.get(node.id) and not _has_stored_file_refs(str(node.options.get("file", ""))):
+                errors.append(make_error("MISSING_LIGAND_FILE", "LigandInput requires uploaded PDB content or upload file ids.", node_id=node.id, node_type=node.type, option_key="file"))
         elif node.type == "ProteinInput":
             if not uploads.get(node.id) and not _has_stored_file_refs(str(node.options.get("file", ""))):
                 errors.append(make_error("MISSING_PROTEIN_FILE", "ProteinInput requires uploaded PDB content or upload file ids.", node_id=node.id, node_type=node.type, option_key="file"))

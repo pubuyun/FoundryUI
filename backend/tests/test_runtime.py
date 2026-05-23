@@ -5,6 +5,11 @@ from backend.runtime.registry import run_registry
 from backend.schemas.payloads import TypedPayload
 from backend.runtime.runner import run_workflow
 from backend.schemas.workflow import RunCreateRequest
+from backend.bio.sequences import pdb_to_sequence
+from backend.bio.ligand import ligand_has_chirality_targets, smiles_to_pdb
+from backend.nodes.common import ExecutionContext
+from backend.nodes.filters import filter_chirality
+from backend.schemas.workflow import WorkflowNode
 
 
 PDB = """ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00 40.00           N
@@ -21,7 +26,6 @@ END
 LIGAND_DEF = """HETATM    1  C1  DEF A   1       1.000   0.000   0.000  1.00 10.00           C
 END
 """
-
 
 def test_lightweight_run_writes_intermediate_artifact() -> None:
     async def execute() -> None:
@@ -101,7 +105,7 @@ def test_unchanged_node_reuses_previous_run_output() -> None:
 
         status = run_registry.status(second_run_id)
         assert status is not None
-        assert status.state == "completed"
+        assert status.state == "completed", status.errors[0]["message"] if status.errors else status.errors
         artifacts = [artifact for artifact in artifact_store.list_run(second_run_id) if artifact.payload_type == "Batch Protein"]
         assert any("_cached_" in artifact.path for artifact in artifacts)
 
@@ -168,3 +172,48 @@ def test_batch_ligand_first_promotes_residue_name_metadata() -> None:
     first = payload.first("Ligand")
 
     assert first.metadata["residue_name"] == "ABC"
+
+
+def test_pdb_to_sequence_uses_standard_residue_codes() -> None:
+    assert pdb_to_sequence(PDB) == "G"
+
+
+def test_filter_chirality_keeps_only_matching_ligand_targets() -> None:
+    async def execute() -> None:
+        run_id = "run_test_filter_by_ligand_match"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        node = WorkflowNode(id="filter", type="FilterChirality", options={"targets": "C1:S"})
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        matching_ligand = smiles_to_pdb("F[C@](Cl)(Br)I")
+        different_ligand = smiles_to_pdb("F[C@@](Cl)(Br)I")
+        matching = artifact_store.write_text(run_id=run_id, path=root / "matching.pdb", content=PDB.replace("END\n", "") + matching_ligand, payload_type="Batch Protein (With Ligand)")
+        different = artifact_store.write_text(run_id=run_id, path=root / "different.pdb", content=PDB.replace("END\n", "") + different_ligand, payload_type="Batch Protein (With Ligand)")
+
+        result = await filter_chirality(
+            ctx,
+            node,
+            {
+                "complexes": TypedPayload(
+                    type_name="Batch Protein (With Ligand)",
+                    item_count=2,
+                    paths=[matching.path, different.path],
+                    data=[PDB + matching_ligand, PDB + different_ligand],
+                ),
+            },
+        )
+
+        assert result["complexes"].item_count == 1
+        assert " CL1 " in result["complexes"].data[0]
+
+    asyncio.run(execute())
+
+
+def test_ligand_has_chirality_targets_uses_atom_names() -> None:
+    ligand = smiles_to_pdb("F[C@](Cl)(Br)I")
+    renamed_ligand = ligand.replace(" C1  UNL", " CX  UNL")
+
+    assert ligand_has_chirality_targets(ligand, [("C1", "S")])
+    assert not ligand_has_chirality_targets(ligand, [("C1", "R")])
+    assert not ligand_has_chirality_targets(renamed_ligand, [("C1", "S")])

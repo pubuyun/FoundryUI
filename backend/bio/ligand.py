@@ -1,22 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 try:
     from rdkit import Chem
     from rdkit.Chem import AllChem
+    from rdkit.Chem import rdCIPLabeler
 except ImportError:  # pragma: no cover - exercised only when RDKit is unavailable
     Chem = None
     AllChem = None
-
-
-def validate_sdf(content: str) -> None:
-    if Chem is None:
-        raise ValueError("RDKit is required to parse SDF files.")
-    supplier = Chem.ForwardSDMolSupplier(content.encode("utf-8"), sanitize=True, removeHs=False)
-    mols = [mol for mol in supplier if mol is not None]
-    if not mols:
-        raise ValueError("SDF contains no valid molecules.")
+    rdCIPLabeler = None
 
 
 def smiles_to_pdb(smiles: str) -> str:
@@ -52,31 +43,48 @@ def pdb_to_smiles(content: str) -> str:
     return smiles
 
 
-def sdf_to_smiles(content: str) -> str:
-    if Chem is None:
-        raise ValueError("RDKit is required to convert SDF to SMILES.")
-    tmp = Path("/tmp/foundryui-upload-smiles.sdf")
-    tmp.write_text(content)
-    supplier = Chem.SDMolSupplier(str(tmp), sanitize=True, removeHs=False)
-    mol = next((candidate for candidate in supplier if candidate is not None), None)
-    tmp.unlink(missing_ok=True)
+def ligand_has_chirality_targets(ligand_pdb: str, targets: list[tuple[str, str]]) -> bool:
+    """Check selected PDB atom names against expected RDKit CIP labels."""
+    if not targets:
+        return True
+    mol = _mol_from_pdb(ligand_pdb)
     if mol is None:
-        raise ValueError("SDF contains no valid molecules.")
-    mol = Chem.RemoveHs(mol, sanitize=False)
-    smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
-    if not smiles:
-        raise ValueError("RDKit could not generate SMILES from SDF.")
-    return smiles
+        return False
+    chirality = _chirality_by_atom_name(mol)
+    return all(chirality.get(atom_name) == expected for atom_name, expected in targets)
 
 
-def sdf_to_pdb(content: str) -> str:
+def _mol_from_pdb(content: str):
     if Chem is None:
-        raise ValueError("RDKit is required to convert SDF to PDB.")
-    tmp = Path("/tmp/foundryui-upload.sdf")
-    tmp.write_text(content)
-    supplier = Chem.SDMolSupplier(str(tmp), sanitize=True, removeHs=False)
-    mol = next((candidate for candidate in supplier if candidate is not None), None)
-    tmp.unlink(missing_ok=True)
+        raise ValueError("RDKit is required to compare ligand structures.")
+    mol = Chem.MolFromPDBBlock(content, sanitize=True, removeHs=False)
     if mol is None:
-        raise ValueError("SDF contains no valid molecules.")
-    return Chem.MolToPDBBlock(mol)
+        mol = Chem.MolFromPDBBlock(content, sanitize=False, removeHs=False)
+    if mol is None:
+        return None
+    try:
+        Chem.SanitizeMol(mol)
+    except Exception:
+        pass
+    return mol
+
+
+def _chirality_by_atom_name(mol) -> dict[str, str]:
+    if Chem is None:
+        raise ValueError("RDKit is required to compare ligand chirality.")
+    try:
+        if rdCIPLabeler is not None:
+            rdCIPLabeler.AssignCIPLabels(mol)
+        else:
+            Chem.AssignStereochemistry(mol, force=True, cleanIt=True)
+    except Exception:
+        Chem.AssignStereochemistry(mol, force=True, cleanIt=True)
+    labels: dict[str, str] = {}
+    for atom in mol.GetAtoms():
+        info = atom.GetPDBResidueInfo()
+        if info is None:
+            continue
+        atom_name = info.GetName().strip()
+        if atom_name and atom.HasProp("_CIPCode"):
+            labels[atom_name] = atom.GetProp("_CIPCode")
+    return labels

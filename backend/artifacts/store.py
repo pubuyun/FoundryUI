@@ -20,6 +20,7 @@ class ArtifactStore:
 
     def init_run(self, run_id: str) -> Path:
         root = self.run_dir(run_id)
+        self.artifacts = {artifact_id: artifact for artifact_id, artifact in self.artifacts.items() if artifact.run_id != run_id}
         for child in ("uploads", "nodes", "saves", "logs"):
             (root / child).mkdir(parents=True, exist_ok=True)
         self.write_manifest(run_id)

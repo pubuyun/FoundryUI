@@ -98,7 +98,7 @@ class RunRegistry:
         record.current_node_type = node_type
         await self.publish(RunEvent(event="node_started", run_id=run_id, node_id=node_id, node_type=node_type))
 
-    async def set_node_completed(self, run_id: str, node_id: str, node_type: str) -> None:
+    async def set_node_completed(self, run_id: str, node_id: str, node_type: str, cached: bool = False) -> None:
         record = self.records[run_id]
         if node_id in record.completed_node_ids:
             return
@@ -110,7 +110,7 @@ class RunRegistry:
                 run_id=run_id,
                 node_id=node_id,
                 node_type=node_type,
-                data={"completed_nodes": record.completed_nodes, "total_nodes": record.total_nodes},
+                data={"completed_nodes": record.completed_nodes, "total_nodes": record.total_nodes, "cached": cached},
             )
         )
 
