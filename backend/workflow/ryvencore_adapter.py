@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
+import shutil
+from pathlib import Path
 
 import ryvencore as rc
 
@@ -46,18 +50,43 @@ class FoundryRyvencoreNode(rc.Node):
     exec_context: ExecutionContext
     runtime_loop: asyncio.AbstractEventLoop
     connected_input_keys: set[str]
+    _foundry_executed: bool = False
 
     def update_event(self, inp=-1):
+        if self._foundry_executed:
+            return
         if not self._inputs_ready():
             return
+        self._foundry_executed = True
+        input_payloads = self._input_payloads()
 
-        async def execute() -> dict[str, TypedPayload]:
+        async def execute() -> tuple[dict[str, TypedPayload], str]:
+            if self.exec_context.registry.is_cancel_requested(self.exec_context.run_id):
+                raise BackendError(
+                    make_error(
+                        "RUN_CANCELLED",
+                        "Run was stopped by the user.",
+                        run_id=self.exec_context.run_id,
+                        node_id=self.workflow_node.id,
+                        node_type=self.workflow_node.type,
+                        recoverable=True,
+                    )
+                )
+            cache_key = _node_cache_key(self.workflow_node, input_payloads, self.exec_context.uploads)
             await self.exec_context.registry.set_node_started(
                 self.exec_context.run_id,
                 self.workflow_node.id,
                 self.workflow_node.type,
             )
             try:
+                cached = await _reuse_cached_outputs(self.exec_context, self.workflow_node, self.output_keys, cache_key)
+                if cached is not None:
+                    await self.exec_context.registry.set_node_completed(
+                        self.exec_context.run_id,
+                        self.workflow_node.id,
+                        self.workflow_node.type,
+                    )
+                    return cached, cache_key
                 handler = HANDLERS.get(self.workflow_node.type)
                 if handler is None:
                     raise BackendError(
@@ -69,19 +98,21 @@ class FoundryRyvencoreNode(rc.Node):
                             node_type=self.workflow_node.type,
                         )
                     )
-                result = await handler(self.exec_context, self.workflow_node, self._input_payloads())
+                result = await handler(self.exec_context, self.workflow_node, input_payloads)
                 await self.exec_context.registry.set_node_completed(
                     self.exec_context.run_id,
                     self.workflow_node.id,
                     self.workflow_node.type,
                 )
-                return result
+                return result, cache_key
             except Exception:
                 raise
 
-        result = self.runtime_loop.run_until_complete(execute())
+        result, cache_key = self.runtime_loop.run_until_complete(execute())
+        self.runtime_loop.run_until_complete(self.exec_context.registry.record_node_cache_key(self.exec_context.run_id, self.workflow_node.id, cache_key))
         for key, payload in result.items():
             if key in self.output_keys:
+                self.runtime_loop.run_until_complete(self.exec_context.registry.record_output(self.exec_context.run_id, self.workflow_node.id, key, payload))
                 self.set_output_val(self.output_keys.index(key), FoundryPayloadData(payload))
 
     def _inputs_ready(self) -> bool:
@@ -232,3 +263,79 @@ def _node_class_for(
             "init_outputs": [rc.NodeOutputType(key) for key in output_keys],
         },
     )
+
+
+def _node_cache_key(node: WorkflowNode, input_payloads: dict[str, TypedPayload], uploads: dict[str, list]) -> str:
+    upload_fingerprints = []
+    for item in uploads.get(node.id, []):
+        content = getattr(item, "content", "")
+        upload_fingerprints.append(
+            {
+                "name": getattr(item, "name", ""),
+                "type": getattr(item, "type", None),
+                "sha256": hashlib.sha256(str(content).encode()).hexdigest(),
+            }
+        )
+    inputs = {
+        key: {
+            "type_name": payload.type_name,
+            "item_count": payload.item_count,
+            "metadata": payload.metadata,
+            "data_sha256": hashlib.sha256(json.dumps(payload.data, sort_keys=True, default=str).encode()).hexdigest(),
+        }
+        for key, payload in sorted(input_payloads.items())
+    }
+    data = {
+        "node_type": node.type,
+        "options": node.options,
+        "uploads": upload_fingerprints,
+        "inputs": inputs,
+    }
+    return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
+
+
+async def _reuse_cached_outputs(ctx: ExecutionContext, node: WorkflowNode, output_keys: list[str], cache_key: str) -> dict[str, TypedPayload] | None:
+    previous_run_id = getattr(ctx.registry.get(ctx.run_id).request, "previous_run_id", None)
+    if not previous_run_id:
+        return None
+    previous = ctx.registry.get(previous_run_id)
+    if previous is None or previous.node_cache_keys.get(node.id) != cache_key:
+        return None
+
+    reused: dict[str, TypedPayload] = {}
+    for output_key in output_keys:
+        previous_payload = previous.outputs.get((node.id, output_key))
+        if previous_payload is None:
+            continue
+        typed = TypedPayload.model_validate(previous_payload)
+        artifacts = []
+        for index, rel_path in enumerate(typed.paths, start=1):
+            source = ctx.store.absolute(previous_run_id, rel_path)
+            if not source.is_file():
+                return None
+            destination = _cached_destination(ctx, node, output_key, index, source)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            artifact = ctx.store.register_file(
+                run_id=ctx.run_id,
+                path=destination,
+                payload_type=typed.type_name,
+                node_id=node.id,
+                node_type=node.type,
+            )
+            await ctx.artifact_created(artifact)
+            artifacts.append(artifact)
+        reused[output_key] = typed.model_copy(
+            update={
+                "artifact_ids": [artifact.artifact_id for artifact in artifacts],
+                "paths": [artifact.path for artifact in artifacts],
+            }
+        )
+    return reused if reused else None
+
+
+def _cached_destination(ctx: ExecutionContext, node: WorkflowNode, output_key: str, index: int, source: Path) -> Path:
+    suffix = "".join(source.suffixes) or ".dat"
+    stem = source.name[: -len(suffix)] if suffix and source.name.endswith(suffix) else source.stem
+    safe_stem = re.sub(r"\W+", "_", stem).strip("_") or output_key
+    return artifact_store.node_dir(ctx.run_id, node.id, node.type) / f"{safe_stem}_cached_{index:04d}{suffix}"

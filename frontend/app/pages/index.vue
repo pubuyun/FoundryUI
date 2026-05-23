@@ -12,6 +12,8 @@ import {
   TextareaInputInterface,
   TextInputInterface,
   defineNode,
+  getDomElements,
+  getPortCoordinates,
   setNodePosition,
   useBaklava,
 } from "baklavajs";
@@ -54,6 +56,15 @@ interface BackendArtifact {
   node_type?: string | null;
 }
 
+interface BackendOutput {
+  node_id: string;
+  output_key: string;
+  type_name: string;
+  item_count: number;
+  artifact_ids: string[];
+  paths: string[];
+}
+
 interface RunStatus {
   run_id: string;
   state: string;
@@ -76,6 +87,14 @@ interface RunEventPayload {
   data?: Record<string, any>;
 }
 
+interface SessionRecord {
+  session_id: string;
+  created_at: string;
+  updated_at: string;
+  latest_run_id?: string | null;
+  document?: Record<string, any> | null;
+}
+
 const baklava = useBaklava();
 baklava.settings.enableMinimap = true;
 baklava.settings.displayValueOnHover = true;
@@ -85,15 +104,20 @@ const registeredConstructors = new Map<string, ReturnType<typeof defineNode>>();
 const typeRegistry = new Map<PortType, NodeInterfaceType<any>>();
 const uploadedByNode = reactive<Record<string, UploadedStructure[]>>({});
 const apiBase = ref("http://127.0.0.1:8000");
-const runState = ref<"idle" | "validating" | "queued" | "running" | "completed" | "failed">("idle");
+const runState = ref<"idle" | "validating" | "queued" | "running" | "completed" | "failed" | "stopped">("idle");
 const currentRunId = ref("");
+const currentSessionId = ref("");
 const runStatus = ref<RunStatus | null>(null);
 const runMessage = ref("Ready");
 const runLogs = ref<string[]>([]);
 const validationErrors = ref<Array<Record<string, any>>>([]);
 const artifacts = ref<BackendArtifact[]>([]);
+const savedArtifacts = ref<BackendArtifact[]>([]);
+const outputs = ref<BackendOutput[]>([]);
+const errorNodeIds = ref(new Set<string>());
 const eventSource = ref<EventSource | null>(null);
 const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : runState.value.toUpperCase()));
+const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
 const viewerEl = ref<HTMLElement | null>(null);
 const workflowFileInput = ref<HTMLInputElement | null>(null);
 const viewerModal = reactive<ViewerModal>({
@@ -464,6 +488,20 @@ function workflowDocument() {
   };
 }
 
+function loadWorkflowDocument(document: any) {
+  const state = document.baklava ?? document.graph ?? document;
+  const warnings = baklava.editor.load(state);
+  Object.keys(uploadedByNode).forEach((nodeId) => {
+    delete uploadedByNode[nodeId];
+  });
+  Object.entries(document.uploads ?? {}).forEach(([nodeId, files]) => {
+    uploadedByNode[nodeId] = files as UploadedStructure[];
+  });
+  if (warnings.length) {
+    console.warn("Workflow loaded with warnings", warnings);
+  }
+}
+
 function saveWorkflow() {
   const blob = new Blob([JSON.stringify(workflowDocument(), null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -475,6 +513,7 @@ function saveWorkflow() {
   anchor.remove();
   URL.revokeObjectURL(url);
   runState.value = "idle";
+  void saveSessionDocument();
 }
 
 function requestLoadWorkflow() {
@@ -491,22 +530,14 @@ async function loadWorkflow(event: Event) {
     return;
   }
   const document = JSON.parse(await file.text());
-  const state = document.baklava ?? document.graph ?? document;
-  const warnings = baklava.editor.load(state);
-  Object.keys(uploadedByNode).forEach((nodeId) => {
-    delete uploadedByNode[nodeId];
-  });
-  Object.entries(document.uploads ?? {}).forEach(([nodeId, files]) => {
-    uploadedByNode[nodeId] = files as UploadedStructure[];
-  });
-  if (warnings.length) {
-    console.warn("Workflow loaded with warnings", warnings);
-  }
+  loadWorkflowDocument(document);
+  await saveSessionDocument();
   input.value = "";
 }
 
-function clearWorkflow() {
+function clearWorkflow(save: boolean | Event = true) {
   [...baklava.editor.graph.nodes].forEach((node) => baklava.editor.graph.removeNode(node));
+  if (save !== false) void saveSessionDocument();
 }
 
 async function queueRun() {
@@ -532,7 +563,7 @@ async function queueRun() {
     runSteps[1]!.done = true;
     const created = await postJson<{ accepted: boolean; run_id?: string; state?: string; errors?: Array<Record<string, any>> }>(
       "/api/runs",
-      { document },
+      { document, session_id: currentSessionId.value || undefined },
     );
     if (!created.accepted || !created.run_id) {
       validationErrors.value = created.errors ?? [];
@@ -542,6 +573,9 @@ async function queueRun() {
     }
 
     currentRunId.value = created.run_id;
+    outputs.value = [];
+    savedArtifacts.value = [];
+    artifacts.value = [];
     runState.value = "queued";
     runMessage.value = `Queued ${created.run_id}`;
     runSteps[2]!.done = true;
@@ -559,9 +593,7 @@ function resetRunUi() {
   });
   runLogs.value = [];
   validationErrors.value = [];
-  artifacts.value = [];
   runStatus.value = null;
-  currentRunId.value = "";
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -577,6 +609,85 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return payload as T;
 }
 
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${apiBase.value}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(readBackendMessage(payload, response.statusText));
+  }
+  return payload as T;
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${apiBase.value}${path}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(readBackendMessage(payload, response.statusText));
+  }
+  return payload as T;
+}
+
+async function ensureSession() {
+  const route = useRoute();
+  const router = useRouter();
+  const requestedSession = typeof route.query.session === "string" ? route.query.session : "";
+  if (requestedSession) {
+    try {
+      const session = await getJson<SessionRecord>(`/api/sessions/${requestedSession}`);
+      currentSessionId.value = session.session_id;
+      if (session.document) {
+        loadWorkflowDocument(session.document);
+      }
+      if (session.latest_run_id) {
+        currentRunId.value = session.latest_run_id;
+        await refreshRunStatus(session.latest_run_id);
+        await refreshRunFiles(session.latest_run_id);
+        if (runState.value === "queued" || runState.value === "running") {
+          connectRunEvents(session.latest_run_id);
+        }
+      }
+      return;
+    } catch (error) {
+      runMessage.value = error instanceof Error ? error.message : "Could not load session";
+    }
+  }
+  const session = await postJson<SessionRecord>("/api/sessions", { document: workflowDocument() });
+  currentSessionId.value = session.session_id;
+  await router.replace({ query: { ...route.query, session: session.session_id } });
+}
+
+async function createNewSession() {
+  closeRunEvents();
+  const route = useRoute();
+  const router = useRouter();
+  clearWorkflow(false);
+  seedExampleWorkflow();
+  const session = await postJson<SessionRecord>("/api/sessions", { document: workflowDocument() });
+  currentSessionId.value = session.session_id;
+  currentRunId.value = "";
+  runStatus.value = null;
+  outputs.value = [];
+  artifacts.value = [];
+  savedArtifacts.value = [];
+  validationErrors.value = [];
+  runLogs.value = [];
+  runState.value = "idle";
+  runMessage.value = "New session created";
+  await router.replace({ query: { ...route.query, session: session.session_id } });
+}
+
+async function saveSessionDocument() {
+  if (!currentSessionId.value) return;
+  await putJson<SessionRecord>(`/api/sessions/${currentSessionId.value}`, {
+    latest_run_id: currentRunId.value || undefined,
+    document: workflowDocument(),
+  });
+}
+
 async function refreshRunStatus(runId = currentRunId.value) {
   if (!runId) return;
   const response = await fetch(`${apiBase.value}/api/runs/${runId}`);
@@ -584,8 +695,10 @@ async function refreshRunStatus(runId = currentRunId.value) {
   const status = (await response.json()) as RunStatus;
   runStatus.value = status;
   if (status.state === "running") runState.value = "running";
+  if (status.state === "queued") runState.value = "queued";
   if (status.state === "completed") runState.value = "completed";
   if (status.state === "failed") runState.value = "failed";
+  if (status.state === "stopped") runState.value = "stopped";
   if (status.recent_output?.length) {
     runLogs.value = status.recent_output.slice(-160);
   }
@@ -597,6 +710,32 @@ async function loadArtifacts(runId = currentRunId.value) {
   if (!response.ok) return;
   const payload = (await response.json()) as { artifacts: BackendArtifact[] };
   artifacts.value = payload.artifacts ?? [];
+}
+
+async function loadSavedArtifacts(runId = currentRunId.value) {
+  if (!runId) return;
+  const response = await fetch(`${apiBase.value}/api/runs/${runId}/saves`);
+  if (!response.ok) return;
+  const payload = (await response.json()) as { artifacts: BackendArtifact[] };
+  savedArtifacts.value = payload.artifacts ?? [];
+}
+
+async function loadOutputs(runId = currentRunId.value) {
+  if (!runId) return;
+  const response = await fetch(`${apiBase.value}/api/runs/${runId}/outputs`);
+  if (!response.ok) return;
+  const payload = (await response.json()) as { outputs: BackendOutput[] };
+  outputs.value = payload.outputs ?? [];
+}
+
+async function refreshRunFiles(runId = currentRunId.value) {
+  await Promise.all([loadArtifacts(runId), loadSavedArtifacts(runId), loadOutputs(runId)]);
+}
+
+async function stopRun() {
+  if (!currentRunId.value) return;
+  await postJson(`/api/runs/${currentRunId.value}/stop`, {});
+  runMessage.value = "Stopping run";
 }
 
 function connectRunEvents(runId: string) {
@@ -615,6 +754,7 @@ function connectRunEvents(runId: string) {
     "warning",
     "error",
     "completed",
+    "stopped",
   ];
   eventNames.forEach((eventName) => {
     source.addEventListener(eventName, (event) => {
@@ -624,7 +764,7 @@ function connectRunEvents(runId: string) {
     });
   });
   source.onerror = () => {
-    if (runState.value !== "completed" && runState.value !== "failed") {
+    if (runState.value !== "completed" && runState.value !== "failed" && runState.value !== "stopped") {
       runMessage.value = "Event stream disconnected";
     }
     closeRunEvents();
@@ -641,24 +781,34 @@ function handleRunEvent(event: RunEventPayload) {
   } else if (event.event === "node_started") {
     runState.value = "running";
     runMessage.value = `${event.node_type ?? "Node"} started`;
+    if (event.node_id) clearNodeError(event.node_id);
   } else if (event.event === "node_completed") {
     runMessage.value = `${event.node_type ?? "Node"} completed`;
     void refreshRunStatus(event.run_id);
+    void loadOutputs(event.run_id);
   } else if (event.event === "artifact_created") {
-    void loadArtifacts(event.run_id);
+    void refreshRunFiles(event.run_id);
   } else if (event.event === "error") {
     runState.value = "failed";
     runMessage.value = event.message ?? "Run failed";
     if (event.data?.error) validationErrors.value = [event.data.error, ...validationErrors.value];
+    if (event.node_id) markNodeError(event.node_id);
     void refreshRunStatus(event.run_id);
-    void loadArtifacts(event.run_id);
+    void refreshRunFiles(event.run_id);
     closeRunEvents();
   } else if (event.event === "completed") {
     runState.value = "completed";
     runMessage.value = "Run completed";
     runSteps[3]!.done = true;
     void refreshRunStatus(event.run_id);
-    void loadArtifacts(event.run_id);
+    void refreshRunFiles(event.run_id);
+    void saveSessionDocument();
+    closeRunEvents();
+  } else if (event.event === "stopped") {
+    runState.value = "stopped";
+    runMessage.value = "Run stopped";
+    void refreshRunStatus(event.run_id);
+    void refreshRunFiles(event.run_id);
     closeRunEvents();
   }
 }
@@ -681,6 +831,46 @@ function artifactUrl(artifact: BackendArtifact) {
 
 function archiveUrl() {
   return currentRunId.value ? `${apiBase.value}/api/runs/${currentRunId.value}/archive` : "#";
+}
+
+function outputForConnection(connection: Connection) {
+  const fromNode = baklava.editor.graph.findNodeById(connection.from.nodeId);
+  if (!fromNode) return undefined;
+  const outputKey = interfaceKey(fromNode, connection.from);
+  return outputs.value.find((output) => output.node_id === fromNode.id && output.output_key === outputKey);
+}
+
+function hasOutputForConnection(connection: Connection) {
+  return Boolean(outputForConnection(connection));
+}
+
+function outputDownloadUrlForConnection(connection: Connection) {
+  const output = outputForConnection(connection);
+  if (!output || !currentRunId.value) return "#";
+  return `${apiBase.value}/api/runs/${currentRunId.value}/outputs/${encodeURIComponent(output.node_id)}/${encodeURIComponent(output.output_key)}/download`;
+}
+
+function connectionCenter(connection: Connection) {
+  try {
+    const from = getPortCoordinates(getDomElements(connection.from));
+    const to = getPortCoordinates(getDomElements(connection.to));
+    return { x: (from[0] + to[0]) / 2, y: (from[1] + to[1]) / 2 };
+  } catch {
+    return { x: 0, y: 0 };
+  }
+}
+
+function markNodeError(nodeId: string) {
+  const next = new Set(errorNodeIds.value);
+  next.add(nodeId);
+  errorNodeIds.value = next;
+}
+
+function clearNodeError(nodeId: string) {
+  if (!errorNodeIds.value.has(nodeId)) return;
+  const next = new Set(errorNodeIds.value);
+  next.delete(nodeId);
+  errorNodeIds.value = next;
 }
 
 function openViewer(nodeId: string, title: string, mode: ViewerModal["mode"]) {
@@ -794,11 +984,13 @@ baklava.hooks.renderInterface.subscribe("foundry-colors", ({ intf, el }) => {
 
 baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
   el.style.setProperty("--foundry-node-color", primaryNodeColor(node));
+  el.classList.toggle("foundry-node-error", errorNodeIds.value.has(node.id));
   return { node, el };
 });
 
 onMounted(() => {
   void nextTick(renderViewer);
+  void ensureSession();
 });
 
 onBeforeUnmount(() => {
@@ -818,17 +1010,21 @@ onBeforeUnmount(() => {
           API
           <input v-model="apiBase" spellcheck="false" />
         </label>
+        <span v-if="currentSessionId" class="session-chip">{{ currentSessionId.slice(0, 18) }}</span>
         <NuxtLink class="doc-link" to="/document">Document</NuxtLink>
+        <NuxtLink class="doc-link" to="/sessions">Sessions</NuxtLink>
+        <button type="button" class="icon-button" title="New session" @click="createNewSession">N</button>
         <button type="button" class="icon-button" title="Save workflow" @click="saveWorkflow">S</button>
         <button type="button" class="icon-button" title="Load workflow" @click="requestLoadWorkflow">L</button>
         <button type="button" class="icon-button" title="Clear canvas" @click="clearWorkflow">C</button>
-        <button type="button" class="run-button" :disabled="runState === 'validating' || runState === 'queued' || runState === 'running'" @click="queueRun">Run</button>
+        <button v-if="isRunActive" type="button" class="stop-button" @click="stopRun">Stop</button>
+        <button type="button" class="run-button" :disabled="isRunActive" @click="queueRun">Run</button>
         <input ref="workflowFileInput" class="workflow-file-input" type="file" accept=".fuiworkflow" @change="loadWorkflow" />
       </nav>
     </header>
 
     <section class="statusbar" aria-label="Run status">
-      <span class="run-state" :class="{ error: runState === 'failed' }">{{ runStateLabel }}</span>
+      <span class="run-state" :class="{ error: runState === 'failed', stopped: runState === 'stopped' }">{{ runStateLabel }}</span>
       <span v-if="currentRunId">{{ currentRunId }}</span>
       <span v-if="runStatus">{{ runStatus.progress_percent }}%</span>
       <span>{{ runMessage }}</span>
@@ -841,6 +1037,15 @@ onBeforeUnmount(() => {
           <template #connection="{ connection }">
             <g class="typed-connection" :style="{ '--connection-color': connectionColor(connection) }">
               <Components.ConnectionWrapper :connection="connection" />
+              <foreignObject
+                v-if="hasOutputForConnection(connection)"
+                :x="connectionCenter(connection).x - 13"
+                :y="connectionCenter(connection).y - 13"
+                width="26"
+                height="26"
+              >
+                <a class="flow-download" :href="outputDownloadUrlForConnection(connection)" title="Download flow data">D</a>
+              </foreignObject>
             </g>
           </template>
         </BaklavaEditor>
@@ -853,6 +1058,7 @@ onBeforeUnmount(() => {
           <h2>Status</h2>
           <a v-if="currentRunId && runState === 'completed'" class="archive-link" :href="archiveUrl()">Archive</a>
           <span v-else-if="runState === 'failed'" class="error-label">ERROR</span>
+          <span v-else-if="runState === 'stopped'" class="stopped-label">STOPPED</span>
         </header>
         <div class="progress-track">
           <div class="progress-fill" :style="{ width: `${runStatus?.progress_percent ?? 0}%` }" />
@@ -881,16 +1087,16 @@ onBeforeUnmount(() => {
 
       <section class="run-panel-section">
         <header>
-          <h2>Artifacts</h2>
-          <span>{{ artifacts.length }}</span>
+          <h2>Saves</h2>
+          <span>{{ savedArtifacts.length }}</span>
         </header>
-        <ul v-if="artifacts.length" class="artifact-list">
-          <li v-for="artifact in artifacts" :key="artifact.artifact_id">
+        <ul v-if="savedArtifacts.length" class="artifact-list">
+          <li v-for="artifact in savedArtifacts" :key="artifact.artifact_id">
             <a :href="artifactUrl(artifact)">{{ artifact.path }}</a>
             <span>{{ artifact.payload_type }} · {{ artifact.item_count }}</span>
           </li>
         </ul>
-        <p v-else>No artifacts yet</p>
+        <p v-else>No saved results yet</p>
       </section>
 
       <section class="run-panel-section logs-section">
@@ -1007,12 +1213,23 @@ onBeforeUnmount(() => {
 
 .doc-link,
 .icon-button,
-.run-button {
+.run-button,
+.stop-button {
   border: 1px solid #c6d0dc;
   background: #ffffff;
   color: #17202a;
   cursor: pointer;
   text-decoration: none;
+}
+
+.session-chip {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #566271;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .doc-link {
@@ -1037,6 +1254,16 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   background: #176f5d;
   border-color: #176f5d;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.stop-button {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 6px;
+  background: #a8343d;
+  border-color: #a8343d;
   color: #ffffff;
   font-weight: 700;
 }
@@ -1079,6 +1306,11 @@ onBeforeUnmount(() => {
 .run-state.error {
   background: #4a1d22;
   color: #ff9c9c;
+}
+
+.run-state.stopped {
+  background: #3b3340;
+  color: #d8b6ff;
 }
 
 .canvas-panel {
@@ -1159,6 +1391,12 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
+.stopped-label {
+  color: #d8b6ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .issue-list,
 .artifact-list {
   list-style: none;
@@ -1209,6 +1447,27 @@ onBeforeUnmount(() => {
 
 .typed-connection .baklava-connection {
   stroke: var(--connection-color, #6d7681) !important;
+}
+
+.flow-download {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #b8c7d7;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #176f5d;
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+.baklava-node.foundry-node-error {
+  border-top-color: #ff5252 !important;
+  box-shadow: 0 0 0 2px rgba(255, 82, 82, 0.75);
 }
 
 .node-file-upload {

@@ -55,6 +55,59 @@ def test_lightweight_run_writes_intermediate_artifact() -> None:
     asyncio.run(execute())
 
 
+def test_run_registry_counts_node_completion_once() -> None:
+    async def execute() -> None:
+        run_id = "run_test_completion_count"
+        await run_registry.create(run_id, total_nodes=1)
+        await run_registry.set_node_completed(run_id, "node_a", "ProteinInput")
+        await run_registry.set_node_completed(run_id, "node_a", "ProteinInput")
+        status = run_registry.status(run_id)
+        assert status is not None
+        assert status.completed_nodes == 1
+        assert status.progress_percent == 100
+
+    asyncio.run(execute())
+
+
+def test_unchanged_node_reuses_previous_run_output() -> None:
+    async def execute() -> None:
+        first_run_id = "run_test_cache_previous"
+        second_run_id = "run_test_cache_current"
+        workflow = {
+            "nodes": [
+                {"id": "protein", "type": "ProteinInput", "outputs": {"batchProtein": {"type": "Batch Protein"}}},
+                {"id": "viewer", "type": "PDBViewer", "inputs": {"structures": {"type": "Batch Structure"}}},
+            ],
+            "connections": [
+                {
+                    "from": {"nodeId": "protein", "key": "batchProtein", "type": "Batch Protein"},
+                    "to": {"nodeId": "viewer", "key": "structures", "type": "Batch Structure"},
+                }
+            ],
+        }
+        base_request = {
+            "workflow": workflow,
+            "uploads": {"protein": [{"name": "protein.pdb", "type": "pdb", "content": PDB}]},
+        }
+        first_request = RunCreateRequest.model_validate(base_request)
+        artifact_store.init_run(first_run_id)
+        await run_registry.create(first_run_id, total_nodes=2, request=first_request)
+        await run_workflow(first_run_id, first_request)
+
+        second_request = RunCreateRequest.model_validate({**base_request, "previous_run_id": first_run_id})
+        artifact_store.init_run(second_run_id)
+        await run_registry.create(second_run_id, total_nodes=2, request=second_request)
+        await run_workflow(second_run_id, second_request)
+
+        status = run_registry.status(second_run_id)
+        assert status is not None
+        assert status.state == "completed"
+        artifacts = [artifact for artifact in artifact_store.list_run(second_run_id) if artifact.payload_type == "Batch Protein"]
+        assert any("_cached_" in artifact.path for artifact in artifacts)
+
+    asyncio.run(execute())
+
+
 def test_single_ligand_input_renames_residue() -> None:
     async def execute() -> None:
         run_id = "run_test_single_ligand_residue"

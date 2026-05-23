@@ -18,6 +18,8 @@ class RunRecord:
     current_node_type: str | None = None
     completed_nodes: int = 0
     total_nodes: int = 0
+    completed_node_ids: set[str] = field(default_factory=set)
+    cancel_requested: bool = False
     recent_output: deque[str] = field(default_factory=lambda: deque(maxlen=200))
     warnings: list[StructuredError] = field(default_factory=list)
     errors: list[StructuredError] = field(default_factory=list)
@@ -25,6 +27,8 @@ class RunRecord:
     events: list[RunEvent] = field(default_factory=list)
     subscribers: list[asyncio.Queue[RunEvent]] = field(default_factory=list)
     request: Any = None
+    outputs: dict[tuple[str, str], Any] = field(default_factory=dict)
+    node_cache_keys: dict[str, str] = field(default_factory=dict)
 
     @property
     def progress_percent(self) -> float:
@@ -96,6 +100,9 @@ class RunRegistry:
 
     async def set_node_completed(self, run_id: str, node_id: str, node_type: str) -> None:
         record = self.records[run_id]
+        if node_id in record.completed_node_ids:
+            return
+        record.completed_node_ids.add(node_id)
         record.completed_nodes += 1
         await self.publish(
             RunEvent(
@@ -112,6 +119,35 @@ class RunRegistry:
         record.errors.append(error)
         record.state = "failed"
         await self.publish(RunEvent(event="error", run_id=run_id, node_id=error.node_id, node_type=error.node_type, message=error.message, data={"error": error.model_dump()}))
+
+    async def request_cancel(self, run_id: str) -> bool:
+        record = self.records.get(run_id)
+        if record is None:
+            return False
+        record.cancel_requested = True
+        if record.state == "queued":
+            record.state = "stopped"
+            await self.publish(RunEvent(event="stopped", run_id=run_id, message="Run stopped."))
+        return True
+
+    def is_cancel_requested(self, run_id: str) -> bool:
+        record = self.records.get(run_id)
+        return bool(record and record.cancel_requested)
+
+    async def stop(self, run_id: str) -> None:
+        record = self.records[run_id]
+        record.state = "stopped"
+        record.current_node_id = None
+        record.current_node_type = None
+        await self.publish(RunEvent(event="stopped", run_id=run_id, message="Run stopped."))
+
+    async def record_output(self, run_id: str, node_id: str, output_key: str, payload: Any) -> None:
+        record = self.records[run_id]
+        record.outputs[(node_id, output_key)] = payload
+
+    async def record_node_cache_key(self, run_id: str, node_id: str, cache_key: str) -> None:
+        record = self.records[run_id]
+        record.node_cache_keys[node_id] = cache_key
 
     async def add_warning(self, run_id: str, warning: StructuredError) -> None:
         record = self.records[run_id]

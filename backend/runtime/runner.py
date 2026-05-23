@@ -25,11 +25,20 @@ async def run_workflow(run_id: str, request: RunCreateRequest) -> None:
         return
 
     try:
+        if run_registry.is_cancel_requested(run_id):
+            await run_registry.stop(run_id)
+            return
         await run_registry.set_started(run_id)
         await _run_blocking_in_thread(lambda: execute_ryvencore_workflow(run_id=run_id, request=request))
+        if run_registry.is_cancel_requested(run_id):
+            await run_registry.stop(run_id)
+            return
         await run_registry.complete(run_id)
     except BackendError as exc:
         exc.error.run_id = exc.error.run_id or run_id
+        if exc.error.code == "RUN_CANCELLED":
+            await run_registry.stop(run_id)
+            return
         await run_registry.add_error(run_id, exc.error)
     except Exception as exc:  # pragma: no cover - defensive runtime guard
         await run_registry.add_error(

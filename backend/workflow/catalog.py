@@ -91,7 +91,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         ),
         options=_options(
             [
-                OptionSpec("length", "int", required=True, min_value=1),
+                OptionSpec("length", "text", "50-200", required=True),
                 OptionSpec("nBatches", "int", 1, min_value=1),
                 OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
             ]

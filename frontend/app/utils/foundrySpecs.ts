@@ -165,7 +165,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "selectExposed", label: "select_exposed", type: "List of Atoms", optional: true },
     ],
     options: [
-      { key: "length", label: "length", kind: "int", value: 120, min: 20, max: 600 },
+      { key: "length", label: "length", kind: "text", value: "50-200" },
       { key: "nBatches", label: "n_batches", kind: "int", value: 1, min: 1 },
       { key: "diffusionBatchSize", label: "diffusion_batch_size", kind: "int", value: 5, min: 1 },
     ],

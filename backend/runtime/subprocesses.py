@@ -49,7 +49,30 @@ async def run_command_streaming(
                 last_stderr = text
             await registry.publish(RunEvent(event=event_name, run_id=run_id, node_id=node_id, node_type=node_type, message=text))
 
-    await asyncio.gather(pump(process.stdout, "stdout", stdout_handle), pump(process.stderr, "stderr", stderr_handle))
+    pump_tasks = [asyncio.create_task(pump(process.stdout, "stdout", stdout_handle)), asyncio.create_task(pump(process.stderr, "stderr", stderr_handle))]
+    while process.returncode is None:
+        if registry.is_cancel_requested(run_id):
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+            await asyncio.gather(*pump_tasks, return_exceptions=True)
+            stdout_handle.close()
+            stderr_handle.close()
+            raise BackendError(
+                make_error(
+                    "RUN_CANCELLED",
+                    "Run was stopped by the user.",
+                    run_id=run_id,
+                    node_id=node_id,
+                    node_type=node_type,
+                    recoverable=True,
+                )
+            )
+        await asyncio.sleep(0.2)
+    await asyncio.gather(*pump_tasks)
     return_code = await process.wait()
     stdout_handle.close()
     stderr_handle.close()

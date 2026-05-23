@@ -18,6 +18,7 @@ EventType = Literal[
     "warning",
     "error",
     "completed",
+    "stopped",
 ]
 
 

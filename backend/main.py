@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +20,11 @@ from backend.runtime.events import sse_encode
 from backend.runtime.queue import QueuedRun, run_queue
 from backend.runtime.registry import run_registry
 from backend.runtime.runner import run_workflow
+from backend.runtime.sessions import session_store
 from backend.runtime.uploads import upload_store
 from backend.schemas.artifacts import ArtifactList
 from backend.schemas.errors import make_error
+from backend.schemas.payloads import TypedPayload
 from backend.schemas.workflow import EmbeddedUpload, FoundryWorkflowDocument, RunCreateRequest, WorkflowGraph, WorkflowValidationResponse
 from backend.workflow.validation import validate_workflow
 
@@ -113,12 +116,25 @@ async def create_run(request: RunCreateRequest) -> dict[str, Any]:
             "errors": [error.model_dump() for error in errors],
         }
 
+    session = session_store.get(request.session_id) if request.session_id else None
+    previous_run_id = session.latest_run_id if session else None
+    if previous_run_id:
+        request = request.model_copy(update={"previous_run_id": previous_run_id})
     run_id = f"run_{uuid.uuid4().hex}"
     artifact_store.init_run(run_id)
     await run_registry.create(run_id, total_nodes=len(graph.nodes), request=request)
+    if request.session_id:
+        session_store.update(request.session_id, latest_run_id=run_id, document=request.document.model_dump(mode="json") if request.document else None)
     _ensure_worker()
     await run_queue.put(QueuedRun(run_id=run_id, request=request))
     return {"accepted": True, "run_id": run_id, "state": "queued"}
+
+
+@app.post("/api/runs/{run_id}/stop")
+async def stop_run(run_id: str):
+    if not await run_registry.request_cancel(run_id):
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return {"accepted": True, "run_id": run_id, "state": "stopping"}
 
 
 @app.get("/api/runs/{run_id}")
@@ -141,7 +157,7 @@ async def run_events(run_id: str):
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15)
                     yield sse_encode(event)
-                    if event.event in {"completed", "error"}:
+                    if event.event in {"completed", "error", "stopped"}:
                         break
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
@@ -156,6 +172,93 @@ async def list_artifacts(run_id: str) -> ArtifactList:
     if run_registry.get(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return ArtifactList(run_id=run_id, artifacts=artifact_store.list_run(run_id))
+
+
+@app.get("/api/runs/{run_id}/outputs")
+async def list_outputs(run_id: str) -> dict[str, Any]:
+    record = run_registry.get(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    outputs = []
+    for (node_id, output_key), payload in record.outputs.items():
+        typed = TypedPayload.model_validate(payload)
+        outputs.append(
+            {
+                "node_id": node_id,
+                "output_key": output_key,
+                "type_name": typed.type_name,
+                "item_count": typed.item_count,
+                "artifact_ids": typed.artifact_ids,
+                "paths": typed.paths,
+            }
+        )
+    return {"run_id": run_id, "outputs": outputs}
+
+
+@app.get("/api/runs/{run_id}/outputs/{node_id}/{output_key}/download")
+async def download_output(run_id: str, node_id: str, output_key: str):
+    record = run_registry.get(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    payload = record.outputs.get((node_id, output_key))
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Output not found.")
+    typed = TypedPayload.model_validate(payload)
+    if not typed.paths:
+        raise HTTPException(status_code=404, detail="Output has no files.")
+    should_zip = len(typed.paths) > 1 or typed.type_name.startswith("Batch ")
+    if not should_zip:
+        path = artifact_store.absolute(run_id, typed.paths[0])
+        return FileResponse(path, filename=Path(typed.paths[0]).name)
+    archive_dir = artifact_store.run_dir(run_id) / "output_archives"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_dir / f"{node_id}_{output_key}.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for rel_path in typed.paths:
+            path = artifact_store.absolute(run_id, rel_path)
+            if path.is_file():
+                archive.write(path, Path(rel_path).name)
+    return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
+
+
+@app.get("/api/runs/{run_id}/saves", response_model=ArtifactList)
+async def list_saved_artifacts(run_id: str) -> ArtifactList:
+    if run_registry.get(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    artifacts = [artifact for artifact in artifact_store.list_run(run_id) if artifact.path.startswith("saves/")]
+    return ArtifactList(run_id=run_id, artifacts=artifacts)
+
+
+@app.post("/api/sessions")
+async def create_session(payload: dict[str, Any] | None = None):
+    record = session_store.create(document=(payload or {}).get("document"))
+    return record.__dict__
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    return {"sessions": [record.__dict__ for record in session_store.list()]}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    record = session_store.get(session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return record.__dict__
+
+
+@app.put("/api/sessions/{session_id}")
+async def update_session(session_id: str, payload: dict[str, Any]):
+    record = session_store.update(session_id, latest_run_id=payload.get("latest_run_id"), document=payload.get("document"))
+    return record.__dict__
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    if not session_store.delete(session_id):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return {"deleted": True}
 
 
 @app.get("/api/artifacts/{artifact_id}")

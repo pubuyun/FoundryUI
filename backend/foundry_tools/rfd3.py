@@ -48,7 +48,7 @@ async def run_rfd3_design(
         "foundryui_design": {
             "input": str(ligand_path),
             "ligand": ligand_residue_name,
-            "length": str(length)+"-200",
+            "length": str(length),
             "select_fixed_atoms": {ligand_residue_name: ",".join(select_fixed_atoms)},
             "select_buried": {ligand_residue_name: ",".join(select_buried)},
             "select_exposed": {ligand_residue_name: ",".join(select_exposed)},

@@ -60,6 +60,8 @@ class RunCreateRequest(BaseModel):
     document: FoundryWorkflowDocument | None = None
     uploads: dict[str, list[EmbeddedUpload]] = {}
     run_name: str | None = None
+    session_id: str | None = None
+    previous_run_id: str | None = None
 
     def workflow_graph(self) -> WorkflowGraph:
         if self.document is not None:
