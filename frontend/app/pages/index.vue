@@ -101,7 +101,9 @@ baklava.settings.nodes.defaultWidth = 278;
 const registeredConstructors = new Map<string, ReturnType<typeof defineNode>>();
 const typeRegistry = new Map<PortType, NodeInterfaceType<any>>();
 const uploadedByNode = reactive<Record<string, UploadedStructure[]>>({});
-const apiBase = ref("http://127.0.0.1:8000");
+const apiBase = ref("");
+const apiStatus = ref<"idle" | "checking" | "available" | "unavailable">("idle");
+const apiMessage = ref("Enter API URL");
 const runState = ref<"idle" | "validating" | "queued" | "running" | "completed" | "failed" | "stopped">("idle");
 const currentRunId = ref("");
 const currentSessionId = ref("");
@@ -117,6 +119,7 @@ const cachedNodeIds = ref(new Set<string>());
 const eventSource = ref<EventSource | null>(null);
 const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : runState.value.toUpperCase()));
 const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
+const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
 const viewerEl = ref<HTMLElement | null>(null);
 const workflowFileInput = ref<HTMLInputElement | null>(null);
 const viewerRuntimeFiles = ref<UploadedStructure[]>([]);
@@ -135,6 +138,45 @@ const runSteps = reactive([
   { label: "Stream model and score results", done: false },
 ]);
 let viewer: any;
+
+function normalizeApiBase(value: string) {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function apiUrl(path: string) {
+  const base = normalizedApiBase.value;
+  if (!base) {
+    throw new Error("Enter an API URL and click Connect.");
+  }
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function restoreApiBase() {
+  if (!import.meta.client) return;
+  apiBase.value = localStorage.getItem("foundryui-api-base") ?? "";
+  if (apiBase.value) {
+    apiMessage.value = "API URL loaded";
+  }
+}
+
+async function connectApi() {
+  apiStatus.value = "checking";
+  apiMessage.value = "Checking API";
+  try {
+    const response = await fetch(apiUrl("/health"), { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Health check failed (${response.status})`);
+    }
+    localStorage.setItem("foundryui-api-base", normalizedApiBase.value);
+    apiBase.value = normalizedApiBase.value;
+    apiStatus.value = "available";
+    apiMessage.value = "API available";
+    await ensureSession();
+  } catch (error) {
+    apiStatus.value = "unavailable";
+    apiMessage.value = error instanceof Error ? error.message : "API unavailable";
+  }
+}
 
 const FileUploadControl = markRaw(
   defineComponent({
@@ -547,7 +589,7 @@ function resetRunUi() {
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${apiBase.value}${path}`, {
+  const response = await fetch(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -560,7 +602,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function putJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${apiBase.value}${path}`, {
+  const response = await fetch(apiUrl(path), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -573,7 +615,7 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBase.value}${path}`);
+  const response = await fetch(apiUrl(path));
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(readBackendMessage(payload, response.statusText));
@@ -582,6 +624,10 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 async function ensureSession() {
+  if (!normalizedApiBase.value) {
+    runMessage.value = "Enter API URL and click Connect";
+    return;
+  }
   const route = useRoute();
   const router = useRouter();
   const requestedSession = typeof route.query.session === "string" ? route.query.session : "";
@@ -640,7 +686,7 @@ async function saveSessionDocument() {
 
 async function refreshRunStatus(runId = currentRunId.value) {
   if (!runId) return;
-  const response = await fetch(`${apiBase.value}/api/runs/${runId}`);
+  const response = await fetch(apiUrl(`/api/runs/${runId}`));
   if (!response.ok) return;
   const status = (await response.json()) as RunStatus;
   runStatus.value = status;
@@ -656,7 +702,7 @@ async function refreshRunStatus(runId = currentRunId.value) {
 
 async function loadArtifacts(runId = currentRunId.value) {
   if (!runId) return;
-  const response = await fetch(`${apiBase.value}/api/runs/${runId}/artifacts`);
+  const response = await fetch(apiUrl(`/api/runs/${runId}/artifacts`));
   if (!response.ok) return;
   const payload = (await response.json()) as { artifacts: BackendArtifact[] };
   artifacts.value = payload.artifacts ?? [];
@@ -664,7 +710,7 @@ async function loadArtifacts(runId = currentRunId.value) {
 
 async function loadSavedArtifacts(runId = currentRunId.value) {
   if (!runId) return;
-  const response = await fetch(`${apiBase.value}/api/runs/${runId}/saves`);
+  const response = await fetch(apiUrl(`/api/runs/${runId}/saves`));
   if (!response.ok) return;
   const payload = (await response.json()) as { artifacts: BackendArtifact[] };
   savedArtifacts.value = payload.artifacts ?? [];
@@ -672,7 +718,7 @@ async function loadSavedArtifacts(runId = currentRunId.value) {
 
 async function loadOutputs(runId = currentRunId.value) {
   if (!runId) return;
-  const response = await fetch(`${apiBase.value}/api/runs/${runId}/outputs`);
+  const response = await fetch(apiUrl(`/api/runs/${runId}/outputs`));
   if (!response.ok) return;
   const payload = (await response.json()) as { outputs: BackendOutput[] };
   outputs.value = payload.outputs ?? [];
@@ -690,7 +736,7 @@ async function stopRun() {
 
 function connectRunEvents(runId: string) {
   closeRunEvents();
-  const source = new EventSource(`${apiBase.value}/api/runs/${runId}/events`);
+  const source = new EventSource(apiUrl(`/api/runs/${runId}/events`));
   eventSource.value = source;
   const eventNames = [
     "queued",
@@ -777,11 +823,11 @@ function readBackendMessage(payload: any, fallback: string) {
 }
 
 function artifactUrl(artifact: BackendArtifact) {
-  return `${apiBase.value}/api/artifacts/${artifact.artifact_id}`;
+  return apiUrl(`/api/artifacts/${artifact.artifact_id}`);
 }
 
 function archiveUrl() {
-  return currentRunId.value ? `${apiBase.value}/api/runs/${currentRunId.value}/archive` : "#";
+  return currentRunId.value ? apiUrl(`/api/runs/${currentRunId.value}/archive`) : "#";
 }
 
 function markNodeError(nodeId: string) {
@@ -944,8 +990,11 @@ baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
 });
 
 onMounted(() => {
+  restoreApiBase();
   void nextTick(renderViewer);
-  void ensureSession();
+  if (normalizedApiBase.value) {
+    void connectApi();
+  }
 });
 
 onBeforeUnmount(() => {
@@ -963,8 +1012,12 @@ onBeforeUnmount(() => {
       <nav class="topbar-actions" aria-label="Workflow actions">
         <label class="api-base">
           API
-          <input v-model="apiBase" spellcheck="false" />
+          <input v-model="apiBase" placeholder="https://api.example.com" spellcheck="false" @keyup.enter="connectApi" />
         </label>
+        <button type="button" class="connect-button" :disabled="apiStatus === 'checking'" @click="connectApi">
+          {{ apiStatus === "checking" ? "Checking" : "Connect" }}
+        </button>
+        <span class="api-feedback" :class="apiStatus">{{ apiMessage }}</span>
         <span v-if="currentSessionId" class="session-chip">{{ currentSessionId.slice(0, 18) }}</span>
         <NuxtLink class="doc-link" to="/document">Document</NuxtLink>
         <NuxtLink class="doc-link" to="/sessions">Sessions</NuxtLink>
@@ -1160,12 +1213,43 @@ onBeforeUnmount(() => {
 .doc-link,
 .icon-button,
 .run-button,
-.stop-button {
+.stop-button,
+.connect-button {
   border: 1px solid #c6d0dc;
   background: #ffffff;
   color: #17202a;
   cursor: pointer;
   text-decoration: none;
+}
+
+.connect-button {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.connect-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.api-feedback {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #667386;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.api-feedback.available {
+  color: #176f5d;
+}
+
+.api-feedback.unavailable {
+  color: #b33939;
 }
 
 .session-chip {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 interface SessionRecord {
   session_id: string;
@@ -8,12 +8,57 @@ interface SessionRecord {
   latest_run_id?: string | null;
 }
 
-const apiBase = ref("http://127.0.0.1:8000");
+const apiBase = ref("");
+const apiStatus = ref<"idle" | "checking" | "available" | "unavailable">("idle");
 const sessions = ref<SessionRecord[]>([]);
-const message = ref("Loading sessions");
+const message = ref("Enter API URL and click Connect");
+const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
+
+function normalizeApiBase(value: string) {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function apiUrl(path: string) {
+  const base = normalizedApiBase.value;
+  if (!base) {
+    throw new Error("Enter an API URL and click Connect.");
+  }
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function restoreApiBase() {
+  apiBase.value = localStorage.getItem("foundryui-api-base") ?? "";
+  if (apiBase.value) {
+    message.value = "API URL loaded";
+  }
+}
+
+async function connectApi() {
+  apiStatus.value = "checking";
+  message.value = "Checking API";
+  try {
+    const response = await fetch(apiUrl("/health"), { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Health check failed (${response.status})`);
+    }
+    localStorage.setItem("foundryui-api-base", normalizedApiBase.value);
+    apiBase.value = normalizedApiBase.value;
+    apiStatus.value = "available";
+    await loadSessions();
+  } catch (error) {
+    apiStatus.value = "unavailable";
+    message.value = error instanceof Error ? error.message : "API unavailable";
+  }
+}
 
 async function loadSessions() {
-  const response = await fetch(`${apiBase.value}/api/sessions`);
+  let response: Response;
+  try {
+    response = await fetch(apiUrl("/api/sessions"));
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : "Could not load sessions";
+    return;
+  }
   if (!response.ok) {
     message.value = "Could not load sessions";
     return;
@@ -24,11 +69,17 @@ async function loadSessions() {
 }
 
 async function createSession() {
-  const response = await fetch(`${apiBase.value}/api/sessions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
+  let response: Response;
+  try {
+    response = await fetch(apiUrl("/api/sessions"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : "Could not create session";
+    return;
+  }
   if (!response.ok) {
     message.value = "Could not create session";
     return;
@@ -38,7 +89,13 @@ async function createSession() {
 }
 
 async function deleteSession(sessionId: string) {
-  const response = await fetch(`${apiBase.value}/api/sessions/${sessionId}`, { method: "DELETE" });
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(`/api/sessions/${sessionId}`), { method: "DELETE" });
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : "Could not delete session";
+    return;
+  }
   if (!response.ok) {
     message.value = "Could not delete session";
     return;
@@ -51,7 +108,12 @@ function sessionUrl(sessionId: string) {
   return `/?session=${encodeURIComponent(sessionId)}`;
 }
 
-onMounted(loadSessions);
+onMounted(() => {
+  restoreApiBase();
+  if (normalizedApiBase.value) {
+    void connectApi();
+  }
+});
 </script>
 
 <template>
@@ -64,8 +126,11 @@ onMounted(loadSessions);
       <nav class="sessions-actions">
         <label>
           API
-          <input v-model="apiBase" spellcheck="false" />
+          <input v-model="apiBase" placeholder="https://api.example.com" spellcheck="false" @keyup.enter="connectApi" />
         </label>
+        <button type="button" class="secondary-button" :disabled="apiStatus === 'checking'" @click="connectApi">
+          {{ apiStatus === "checking" ? "Checking" : "Connect" }}
+        </button>
         <NuxtLink class="secondary-button" to="/">Workbench</NuxtLink>
         <button type="button" class="primary-button" @click="createSession">New Session</button>
       </nav>
