@@ -32,7 +32,7 @@ async def run_rfd3_design(
 ) -> list[Path]:
     out_dir = work_dir / "rfd3_outputs"
     input_json = work_dir / "sm_binder_design.json"
-    ckpt_path = checkpoint_path("FOUNDRYUI_RFD3_CKPT", "models/rfd3_foundry_2025_12_01_remapped.ckpt")
+    ckpt_path = checkpoint_path("FOUNDRYUI_RFD3_CKPT", "models/rfd3_latest.ckpt")
     if not ckpt_path.exists():
         raise BackendError(
             make_error( 
