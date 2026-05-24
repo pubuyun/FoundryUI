@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 import zipfile
 from pathlib import Path
@@ -31,8 +32,12 @@ from backend.workflow.validation import validate_workflow
 app = FastAPI(title="FoundryUI Backend")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv("FOUNDRYUI_CORS_ORIGINS", "*").split(",")
+        if origin.strip()
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
