@@ -251,9 +251,6 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         options=_options([OptionSpec("folder", "text", "outputs/ligands")]),
         terminal=True,
     ),
-    "StringPrimitive": NodeSpec("StringPrimitive", options=_options([OptionSpec("value", "text", "")]), outputs=_ports([PortSpec("value", "Any")])),
-    "IntPrimitive": NodeSpec("IntPrimitive", options=_options([OptionSpec("value", "int", 0)]), outputs=_ports([PortSpec("value", "Any")])),
-    "FloatPrimitive": NodeSpec("FloatPrimitive", options=_options([OptionSpec("value", "float", 0.0)]), outputs=_ports([PortSpec("value", "Any")])),
 }
 
 

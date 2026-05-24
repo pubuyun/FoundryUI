@@ -17,7 +17,6 @@ PayloadType = Literal[
     "Batch Sequence",
     "Score",
     "Batch Structure",
-    "Any",
 ]
 
 

@@ -7,8 +7,7 @@ export type PortType =
   | "Batch Ligand"
   | "Batch Protein (With Ligand)"
   | "Batch Sequence"
-  | "Score"
-  | "Any";
+  | "Score";
 
 export type OptionKind = "text" | "textarea" | "int" | "float" | "bool" | "select" | "file" | "viewer";
 
@@ -83,7 +82,6 @@ export const colorsByType: Record<PortType, string> = {
   "Batch Protein (With Ligand)": "#c74b67",
   "Batch Sequence": "#7d8b23",
   Score: "#d28a19",
-  Any: "#6d7681",
 };
 
 export const nodeSpecs: FoundryNodeSpec[] = [
@@ -357,29 +355,5 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     description: "Save ligand or batch ligand structures as PDB files.",
     inputs: [{ key: "ligand", label: "(Batch) Ligand", type: "Ligand" }],
     options: [{ key: "folder", label: "Folder Selector", kind: "text", value: "outputs/ligands" }],
-  },
-  {
-    type: "StringPrimitive",
-    title: "String",
-    category: "Primitive",
-    description: "Primitive string value.",
-    options: [{ key: "value", label: "value", kind: "text", value: "" }],
-    outputs: [{ key: "value", label: "string", type: "Any" }],
-  },
-  {
-    type: "IntPrimitive",
-    title: "Integer",
-    category: "Primitive",
-    description: "Primitive integer value.",
-    options: [{ key: "value", label: "value", kind: "int", value: 0 }],
-    outputs: [{ key: "value", label: "int", type: "Any" }],
-  },
-  {
-    type: "FloatPrimitive",
-    title: "Float",
-    category: "Primitive",
-    description: "Primitive floating point value.",
-    options: [{ key: "value", label: "value", kind: "float", value: 0 }],
-    outputs: [{ key: "value", label: "float", type: "Any" }],
   },
 ];

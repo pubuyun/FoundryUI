@@ -9,14 +9,10 @@ from backend.nodes.mpnn import ligand_mpnn, protein_mpnn
 from backend.nodes.save import save_ligands, save_proteins, save_proteins_with_scores, save_sequences
 from backend.nodes.selectors import atom_selector, residue_selector
 from backend.nodes.utils import merge, protein_to_seq, split
+from backend.nodes.common import ExecutionContext
 from backend.nodes.viewers import pdb_viewer, sequence_viewer
 from backend.schemas.payloads import TypedPayload
 from backend.schemas.workflow import WorkflowNode
-from backend.nodes.common import ExecutionContext
-
-
-async def primitive_value(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:
-    return {"value": TypedPayload(type_name="Any", item_count=1, data=node.options.get("value"))}
 
 
 async def note(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:
@@ -47,7 +43,4 @@ HANDLERS = {
     "SaveProteins": save_proteins,
     "SaveSequences": save_sequences,
     "SaveLigands": save_ligands,
-    "StringPrimitive": primitive_value,
-    "IntPrimitive": primitive_value,
-    "FloatPrimitive": primitive_value,
 }

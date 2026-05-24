@@ -93,10 +93,16 @@ interface SessionRecord {
   document?: Record<string, any> | null;
 }
 
+interface WorkflowPreset {
+  label: string;
+  file: string;
+}
+
 const baklava = useBaklava();
 baklava.settings.enableMinimap = true;
 baklava.settings.displayValueOnHover = true;
 baklava.settings.nodes.defaultWidth = 278;
+baklava.settings.palette.enabled = false;
 
 const registeredConstructors = new Map<string, ReturnType<typeof defineNode>>();
 const typeRegistry = new Map<PortType, NodeInterfaceType<any>>();
@@ -114,6 +120,8 @@ const validationErrors = ref<Array<Record<string, any>>>([]);
 const artifacts = ref<BackendArtifact[]>([]);
 const savedArtifacts = ref<BackendArtifact[]>([]);
 const outputs = ref<BackendOutput[]>([]);
+const workflowPresets = ref<WorkflowPreset[]>([]);
+const selectedWorkflowPreset = ref("");
 const errorNodeIds = ref(new Set<string>());
 const cachedNodeIds = ref(new Set<string>());
 const eventSource = ref<EventSource | null>(null);
@@ -131,12 +139,6 @@ const viewerModal = reactive<ViewerModal>({
   fileIndex: 0,
   style: "cartoon",
 });
-const runSteps = reactive([
-  { label: "Validate typed graph", done: false },
-  { label: "Package Ryvencore workflow", done: false },
-  { label: "Queue Foundry task", done: false },
-  { label: "Stream model and score results", done: false },
-]);
 let viewer: any;
 
 function normalizeApiBase(value: string) {
@@ -310,7 +312,6 @@ function registerTypes() {
   typeDetails.forEach(({ name }) => {
     typeRegistry.set(name, new NodeInterfaceType(name));
   });
-  typeRegistry.set("Any", new NodeInterfaceType("Any"));
 
   typeRegistry.get("Protein")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Ligand")?.addConversion(typeRegistry.get("Batch Ligand")!, (value) => value);
@@ -352,7 +353,7 @@ function seedExampleWorkflow() {
 }
 
 function portColor(typeName: string | undefined) {
-  return colorsByType[(typeName as PortType) ?? "Any"] ?? colorsByType.Any;
+  return typeName ? colorsByType[typeName as PortType] ?? "#6d7681" : "#6d7681";
 }
 
 function primaryNodeColor(node: AbstractNode) {
@@ -508,8 +509,32 @@ function saveWorkflow() {
   void saveSessionDocument();
 }
 
+async function loadWorkflowPresets() {
+  try {
+    const response = await fetch("/workflows/presets.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = (await response.json()) as { presets?: WorkflowPreset[] };
+    workflowPresets.value = (payload.presets ?? []).filter((preset) => preset.label && preset.file);
+  } catch {
+    workflowPresets.value = [];
+  }
+}
+
 function requestLoadWorkflow() {
   workflowFileInput.value?.click();
+}
+
+async function loadWorkflowPreset() {
+  if (!selectedWorkflowPreset.value) return;
+  try {
+    const response = await fetch(`/workflows/${selectedWorkflowPreset.value}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Could not load preset (${response.status})`);
+    loadWorkflowDocument(await response.json());
+    await saveSessionDocument();
+    selectedWorkflowPreset.value = "";
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : "Could not load preset workflow.");
+  }
 }
 
 async function loadWorkflow(event: Event) {
@@ -545,14 +570,12 @@ async function queueRun() {
       { document },
     );
     validationErrors.value = validation.errors ?? [];
-    runSteps[0]!.done = validation.valid;
     if (!validation.valid) {
       runState.value = "failed";
       runMessage.value = "Validation failed";
       return;
     }
 
-    runSteps[1]!.done = true;
     const created = await postJson<{ accepted: boolean; run_id?: string; state?: string; errors?: Array<Record<string, any>> }>(
       "/api/runs",
       { document, session_id: currentSessionId.value || undefined },
@@ -570,7 +593,6 @@ async function queueRun() {
     artifacts.value = [];
     runState.value = "queued";
     runMessage.value = `Queued ${created.run_id}`;
-    runSteps[2]!.done = true;
     connectRunEvents(created.run_id);
     await refreshRunStatus(created.run_id);
   } catch (error) {
@@ -580,9 +602,6 @@ async function queueRun() {
 }
 
 function resetRunUi() {
-  runSteps.forEach((step) => {
-    step.done = false;
-  });
   runLogs.value = [];
   validationErrors.value = [];
   runStatus.value = null;
@@ -796,7 +815,6 @@ function handleRunEvent(event: RunEventPayload) {
   } else if (event.event === "completed") {
     runState.value = "completed";
     runMessage.value = "Run completed";
-    runSteps[3]!.done = true;
     void refreshRunStatus(event.run_id);
     void refreshRunFiles(event.run_id);
     void saveSessionDocument();
@@ -991,6 +1009,7 @@ baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
 
 onMounted(() => {
   restoreApiBase();
+  void loadWorkflowPresets();
   void nextTick(renderViewer);
   if (normalizedApiBase.value) {
     void connectApi();
@@ -1023,7 +1042,13 @@ onBeforeUnmount(() => {
         <NuxtLink class="doc-link" to="/sessions">Sessions</NuxtLink>
         <button type="button" class="icon-button" title="New session" @click="createNewSession">N</button>
         <button type="button" class="icon-button" title="Save workflow" @click="saveWorkflow">S</button>
-        <button type="button" class="icon-button" title="Load workflow" @click="requestLoadWorkflow">L</button>
+        <div class="load-workflow-menu">
+          <button type="button" class="icon-button" title="Load workflow file" @click="requestLoadWorkflow">L</button>
+          <select v-model="selectedWorkflowPreset" title="Load workflow preset" @change="loadWorkflowPreset">
+            <option value="">Presets</option>
+            <option v-for="preset in workflowPresets" :key="preset.file" :value="preset.file">{{ preset.label }}</option>
+          </select>
+        </div>
         <button type="button" class="icon-button" title="Clear canvas" @click="clearWorkflow">C</button>
         <button v-if="isRunActive" type="button" class="stop-button" @click="stopRun">Stop</button>
         <button type="button" class="run-button" :disabled="isRunActive" @click="queueRun">Run</button>
@@ -1036,7 +1061,6 @@ onBeforeUnmount(() => {
       <span v-if="currentRunId">{{ currentRunId }}</span>
       <span v-if="runStatus">{{ runStatus.progress_percent }}%</span>
       <span>{{ runMessage }}</span>
-      <span v-for="step in runSteps" :key="step.label" :class="{ done: step.done }">{{ step.label }}</span>
     </section>
 
     <section class="canvas-panel" aria-label="Workflow canvas">
@@ -1055,7 +1079,10 @@ onBeforeUnmount(() => {
       <section class="run-panel-section">
         <header>
           <h2>Status</h2>
-          <a v-if="currentRunId && runState === 'completed'" class="archive-link" :href="archiveUrl()">Archive Download</a>
+          <a v-if="currentRunId && runState === 'completed'" class="archive-link" :href="archiveUrl()" title="Download archive">
+            <span aria-hidden="true">↓</span>
+            Archive Download
+          </a>
           <span v-else-if="runState === 'failed'" class="error-label">ERROR</span>
           <span v-else-if="runState === 'stopped'" class="stopped-label">STOPPED</span>
         </header>
@@ -1210,6 +1237,28 @@ onBeforeUnmount(() => {
   padding: 0 8px;
 }
 
+.load-workflow-menu {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+}
+
+.load-workflow-menu .icon-button {
+  border-radius: 6px 0 0 6px;
+}
+
+.load-workflow-menu select {
+  width: 92px;
+  height: 32px;
+  border: 1px solid #c6d0dc;
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+  background: #ffffff;
+  color: #17202a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .doc-link,
 .icon-button,
 .run-button,
@@ -1320,11 +1369,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.statusbar .done {
-  color: #7ee0c4;
-  font-weight: 700;
-}
-
 .run-state {
   padding: 4px 8px;
   border-radius: 5px;
@@ -1411,6 +1455,9 @@ onBeforeUnmount(() => {
 
 .archive-link,
 .artifact-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: #7ee0c4;
   text-decoration: none;
 }
@@ -1464,6 +1511,62 @@ onBeforeUnmount(() => {
 .canvas-panel .baklava-editor {
   width: 100%;
   height: 100%;
+}
+
+.baklava-node-palette {
+  display: none !important;
+}
+
+.baklava-context-menu {
+  width: max-content;
+  min-width: 220px;
+  max-width: min(720px, calc(100vw - 32px));
+  overflow: visible;
+  border: 1px solid rgba(190, 207, 226, 0.24);
+  border-radius: 8px !important;
+}
+
+.baklava-context-menu > .item {
+  min-height: 30px;
+  border-left: 4px solid #6d7681;
+  white-space: nowrap;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 1) {
+  border-left-color: #249a86;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 2) {
+  border-left-color: #c74b67;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 3) {
+  border-left-color: #7d8b23;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 4) {
+  border-left-color: #9062ce;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 5) {
+  border-left-color: #d28a19;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n) {
+  border-left-color: #e2559b;
+}
+
+@media (max-height: 760px) {
+  .baklava-context-menu {
+    min-width: 440px;
+    column-count: 2;
+    column-gap: 0;
+  }
+
+  .baklava-context-menu > .item,
+  .baklava-context-menu > .divider {
+    break-inside: avoid;
+  }
 }
 
 .baklava-node {

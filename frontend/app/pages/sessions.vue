@@ -8,7 +8,8 @@ interface SessionRecord {
   latest_run_id?: string | null;
 }
 
-const apiBase = ref("");
+const DEFAULT_API_BASE = "http://127.0.0.1:8000";
+const apiBase = ref(DEFAULT_API_BASE);
 const apiStatus = ref<"idle" | "checking" | "available" | "unavailable">("idle");
 const sessions = ref<SessionRecord[]>([]);
 const message = ref("Enter API URL and click Connect");
@@ -27,10 +28,8 @@ function apiUrl(path: string) {
 }
 
 function restoreApiBase() {
-  apiBase.value = localStorage.getItem("foundryui-api-base") ?? "";
-  if (apiBase.value) {
-    message.value = "API URL loaded";
-  }
+  apiBase.value = localStorage.getItem("foundryui-api-base") ?? DEFAULT_API_BASE;
+  message.value = apiBase.value === DEFAULT_API_BASE ? "Using default local API" : "API URL loaded";
 }
 
 async function connectApi() {
@@ -126,7 +125,7 @@ onMounted(() => {
       <nav class="sessions-actions">
         <label>
           API
-          <input v-model="apiBase" placeholder="https://api.example.com" spellcheck="false" @keyup.enter="connectApi" />
+          <input v-model="apiBase" placeholder="http://127.0.0.1:8000" spellcheck="false" @keyup.enter="connectApi" />
         </label>
         <button type="button" class="secondary-button" :disabled="apiStatus === 'checking'" @click="connectApi">
           {{ apiStatus === "checking" ? "Checking" : "Connect" }}

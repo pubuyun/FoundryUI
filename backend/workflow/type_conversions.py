@@ -4,7 +4,7 @@ from backend.schemas.payloads import TypedPayload
 
 
 def is_assignable(source: str, target: str) -> bool:
-    if target == "Any" or source == "Any" or source == target:
+    if source == target:
         return True
     if target == "Batch Structure" and source in {"Batch Protein", "Batch Protein with Ligand", "Batch Protein (With Ligand)", "Batch Structure"}:
         return True
@@ -22,7 +22,7 @@ def is_assignable(source: str, target: str) -> bool:
 
 
 def convert_payload(payload: TypedPayload, target_type: str) -> TypedPayload:
-    if target_type == "Any" or payload.type_name == target_type:
+    if payload.type_name == target_type:
         return payload
     if target_type == "Batch Structure" and payload.type_name in {"Batch Protein", "Batch Protein with Ligand", "Batch Protein (With Ligand)"}:
         return payload.as_batch_structure()

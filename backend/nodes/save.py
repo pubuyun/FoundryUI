@@ -58,6 +58,7 @@ async def save_sequences(ctx: ExecutionContext, node: WorkflowNode, inputs: dict
     target_dir.mkdir(parents=True, exist_ok=True)
     sequences = inputs["sequences"].data or []
     await ctx.write_text_artifact(node, target_dir / "sequences.fasta", write_fasta(sequences), "Batch Sequence", "text/x-fasta", item_count=len(sequences))
+    await _zip_saved_folder(ctx, node, target_dir, "sequences.zip", "Saved Sequences", len(sequences))
     return {}
 
 
@@ -86,4 +87,5 @@ async def save_ligands(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[s
     for index, rel_path in enumerate(ligand.paths, start=1):
         artifact = ctx.store.copy_artifact(run_id=ctx.run_id, source_relative_path=rel_path, destination=target_dir / f"ligand_{index:04d}.pdb", payload_type=ligand.type_name, node_id=node.id, node_type=node.type)
         await ctx.artifact_created(artifact)
+    await _zip_saved_folder(ctx, node, target_dir, "ligands.zip", "Saved Ligands", ligand.item_count)
     return {}

@@ -46,7 +46,9 @@ install_basic_packages_if_possible() {
   if command -v apt-get >/dev/null 2>&1; then
     log "Installing missing OS packages for: ${missing[*]}"
     as_root apt-get update
-    as_root apt-get install -y git curl nodejs npm systemd
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+    as_root apt-get install -y nodejs
+    as_root apt-get install -y git curl systemd
   else
     fail "Missing commands: ${missing[*]}. Install them first, then rerun this script."
   fi
@@ -114,8 +116,8 @@ FRONTEND_HOST="$FRONTEND_HOST"
 FRONTEND_PORT="$FRONTEND_PORT"
 
 export FOUNDRY_CHECKPOINT_DIRS="\$ROOT_DIR/models"
-export FOUNDRYUI_RFD3_CKPT="\${FOUNDRYUI_RFD3_CKPT:-\$ROOT_DIR/models/rfd3_foundry_2025_12_01_remapped.ckpt}"
-export FOUNDRYUI_RF3_CKPT="\${FOUNDRYUI_RF3_CKPT:-\$ROOT_DIR/models/rf3_latest.ckpt}"
+export FOUNDRYUI_RFD3_CKPT="\${FOUNDRYUI_RFD3_CKPT:-\$ROOT_DIR/models/rfd3_latest.ckpt}"
+export FOUNDRYUI_RF3_CKPT="\${FOUNDRYUI_RF3_CKPT:-\$ROOT_DIR/models/rf3_foundry_2025_12_01_remapped.ckpt}"
 export HOST="\$FRONTEND_HOST"
 export PORT="\$FRONTEND_PORT"
 export NITRO_HOST="\$FRONTEND_HOST"

@@ -1,0 +1,20 @@
+{
+    "presets": [
+        {
+            "label": "Ligand Binder Workflow",
+            "file": "ligand-binder-denovo.fuiworkflow"
+        },
+        {
+            "label": "LigandMPNN",
+            "file": "ligandmpnn.fuiworkflow"
+        },
+        {
+            "label": "ProteinMPNN",
+            "file": "proteinmpnn.fuiworkflow"
+        },
+        {
+            "label": "RosettaFold",
+            "file": "rf3.fuiworkflow"
+        }
+    ]
+}
