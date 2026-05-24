@@ -220,7 +220,7 @@ function createPortInterface(port: PortSpec, isInput = false) {
 }
 
 function createOptionInterface(option: OptionSpec) {
-  let intf: NodeInterface<any>;
+  let intf: NodeInterfaceTypeBase<any>;
   if (option.kind === "textarea") {
     intf = new TextareaInputInterface(option.label, String(option.value));
   } else if (option.kind === "text") {
@@ -244,7 +244,7 @@ function createOptionInterface(option: OptionSpec) {
   return intf;
 }
 
-function applyPortType(intf: NodeInterface<any>, type: PortType) {
+function applyPortType(intf: NodeInterfaceTypeBase<any>, type: PortType) {
   const foundryType = typeRegistry.get(type);
   if (foundryType) {
     setType(intf, foundryType);
@@ -329,8 +329,8 @@ function nodeByModal() {
 
 function selectorInterface(node = nodeByModal()) {
   if (!node) return undefined;
-  if (viewerModal.mode === "atom") return node.inputs.atoms as NodeInterface<string> | undefined;
-  if (viewerModal.mode === "residue") return node.inputs.residues as NodeInterface<string> | undefined;
+  if (viewerModal.mode === "atom") return node.inputs.atoms as NodeInterfaceTypeBase<string> | undefined;
+  if (viewerModal.mode === "residue") return node.inputs.residues as NodeInterfaceTypeBase<string> | undefined;
   return undefined;
 }
 
@@ -373,7 +373,7 @@ function specForNode(node: AbstractNode) {
   return nodeSpecs.find((spec) => spec.type === node.type);
 }
 
-function interfaceKey(node: AbstractNode | undefined, intf: NodeInterface<any>) {
+function interfaceKey(node: AbstractNode | undefined, intf: NodeInterfaceTypeBase<any>) {
   if (!node) return intf.name;
   const input = Object.entries(node.inputs).find(([, candidate]) => candidate.id === intf.id);
   if (input) return input[0];
