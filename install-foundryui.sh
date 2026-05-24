@@ -115,7 +115,7 @@ FRONTEND_PORT="$FRONTEND_PORT"
 
 export FOUNDRY_CHECKPOINT_DIRS="\$ROOT_DIR/models"
 export FOUNDRYUI_RFD3_CKPT="\${FOUNDRYUI_RFD3_CKPT:-\$ROOT_DIR/models/rfd3_foundry_2025_12_01_remapped.ckpt}"
-export FOUNDRYUI_RF3_CKPT="\${FOUNDRYUI_RF3_CKPT:-\$ROOT_DIR/models/rf3_foundry_01_24_latest_remapped.ckpt}"
+export FOUNDRYUI_RF3_CKPT="\${FOUNDRYUI_RF3_CKPT:-\$ROOT_DIR/models/rf3_latest.ckpt}"
 export HOST="\$FRONTEND_HOST"
 export PORT="\$FRONTEND_PORT"
 export NITRO_HOST="\$FRONTEND_HOST"
