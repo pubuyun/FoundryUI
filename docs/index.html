@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <title>FoundryUI Docs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify/lib/themes/dark.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/dark.css" />
   <style>
     :root { --theme-color: #56d3b7; }
     .markdown-section { max-width: 1080px; }
@@ -42,12 +42,23 @@
       name: 'FoundryUI',
       repo: '',
       loadSidebar: true,
+      alias: {
+        '/.*/_sidebar.md': '/_sidebar.md'
+      },
+      maxLevel: 4,
       subMaxLevel: 3,
       auto2top: true,
-      search: 'auto'
+      search: {
+        maxAge: 86400000,
+        paths: 'auto',
+        placeholder: 'Search FoundryUI docs',
+        noData: 'No results',
+        depth: 6,
+        hideOtherSidebarContent: false
+      }
     };
   </script>
-  <script src="//cdn.jsdelivr.net/npm/docsify/lib/docsify.min.js"></script>
-  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/search.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
 </body>
 </html>
