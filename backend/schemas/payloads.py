@@ -10,6 +10,8 @@ PayloadType = Literal[
     "Protein",
     "List of Residues",
     "List of Atoms",
+    "Residues Atoms List",
+    "Protein Atoms List",
     "Batch Protein",
     "Batch Ligand",
     "Batch Protein with Ligand",

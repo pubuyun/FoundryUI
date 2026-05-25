@@ -60,6 +60,23 @@ async def protein_input(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[
     return {"batchProtein": payload_from_artifacts("Batch Protein", artifacts, data=pdbs)}
 
 
+async def protein_with_ligand_input(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:
+    uploads = embedded_or_stored_uploads(ctx, node)
+    if not uploads:
+        raise BackendError(make_error("MISSING_COMPLEX_FILE", "ProteinWithLigandInput requires uploaded PDB files.", run_id=ctx.run_id, node_id=node.id, node_type=node.type, option_key="file"))
+    out_dir = node_dir(ctx, node)
+    artifacts = []
+    pdbs: list[str] = []
+    for index, (name, file_type, content) in enumerate(uploads, start=1):
+        if (file_type or Path(name).suffix.lower().lstrip(".")).lower() != "pdb":
+            raise BackendError(make_error("INVALID_COMPLEX_FILE_TYPE", "ProteinWithLigandInput accepts PDB files.", run_id=ctx.run_id, node_id=node.id, node_type=node.type, option_key="file", details={"file": name}))
+        validate_pdb(content)
+        artifact = await ctx.write_text_artifact(node, out_dir / f"complex_{index:04d}.pdb", content, "Batch Protein with Ligand", "chemical/x-pdb")
+        artifacts.append(artifact)
+        pdbs.append(content)
+    return {"complexes": payload_from_artifacts("Batch Protein with Ligand", artifacts, data=pdbs)}
+
+
 async def sequence_input(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:
     uploads = embedded_or_stored_uploads(ctx, node)
     if not uploads:

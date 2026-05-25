@@ -82,6 +82,10 @@ def split_selector(value: Any) -> list[str]:
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
+def option_file_tokens(node: WorkflowNode) -> list[str]:
+    return [part.strip() for part in str(node.options.get("file") or "").split(",") if part.strip()]
+
+
 def payload_from_artifacts(type_name: str, artifacts: list[ArtifactMetadata], data: Any = None, metadata: dict[str, Any] | None = None, item_count: int | None = None) -> TypedPayload:
     return TypedPayload(
         type_name=type_name,
@@ -95,12 +99,15 @@ def payload_from_artifacts(type_name: str, artifacts: list[ArtifactMetadata], da
 
 def embedded_or_stored_uploads(ctx: ExecutionContext, node: WorkflowNode) -> list[tuple[str, str, str]]:
     embedded = ctx.uploads.get(node.id, [])
+    if not embedded:
+        file_names = set(option_file_tokens(node))
+        if file_names:
+            embedded = [item for items in ctx.uploads.values() for item in items if item.name in file_names]
     if embedded:
         return [(item.name, item.type or Path(item.name).suffix.lower().lstrip("."), item.content) for item in embedded]
 
-    file_value = str(node.options.get("file") or "")
     results: list[tuple[str, str, str]] = []
-    for token in [part.strip() for part in file_value.split(",") if part.strip()]:
+    for token in option_file_tokens(node):
         stored = upload_store.get(token)
         if stored is not None:
             results.append((stored.name, stored.type, stored.path.read_text()))

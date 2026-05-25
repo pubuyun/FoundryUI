@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from backend.nodes.filters import filter_atoms_chirality, filter_chirality, filter_by_score
 from backend.nodes.folding import rosetta_fold
-from backend.nodes.generation import rfdiffusion_smbinder
-from backend.nodes.inputs import ligand_input, protein_input, sequence_input
+from backend.nodes.generation import rfdiffusion_enzyme, rfdiffusion_protein_binder, rfdiffusion_smbinder
+from backend.nodes.inputs import ligand_input, protein_input, protein_with_ligand_input, sequence_input
 from backend.nodes.logic import binary_logic
 from backend.nodes.mpnn import ligand_mpnn, protein_mpnn
 from backend.nodes.save import save_ligands, save_proteins, save_proteins_with_scores, save_sequences
-from backend.nodes.selectors import atom_selector, residue_selector
+from backend.nodes.selectors import atom_selector, protein_chain_selector, protein_atom_selector, residue_selector
 from backend.nodes.utils import merge, protein_to_seq, split
 from backend.nodes.common import ExecutionContext
 from backend.nodes.viewers import pdb_viewer, sequence_viewer
@@ -23,10 +23,16 @@ HANDLERS = {
     "MDNote": note,
     "LigandInput": ligand_input,
     "ProteinInput": protein_input,
+    "ProteinWithLigandInput": protein_with_ligand_input,
     "SequenceInput": sequence_input,
     "AtomSelector": atom_selector,
     "ResidueSelector": residue_selector,
+    "ProteinAtomSelector": protein_atom_selector,
+    "ResidueAtomSelector": protein_atom_selector,
+    "ProteinChainSelector": protein_chain_selector,
     "RFDiffusionSMbinder": rfdiffusion_smbinder,
+    "RFDiffusionProteinBinder": rfdiffusion_protein_binder,
+    "RFDiffusionEnzyme": rfdiffusion_enzyme,
     "LigandMPNN": ligand_mpnn,
     "ProteinMPNN": protein_mpnn,
     "RosettaFold": rosetta_fold,

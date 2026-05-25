@@ -82,7 +82,7 @@ class FoundryRyvencoreNode(rc.Node):
             )
             try:
                 cached = None
-                if self.workflow_node.type not in {"AtomSelector", "ResidueSelector", "FilterAtomsChirality"}:
+                if self.workflow_node.type not in {"AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "FilterAtomsChirality"}:
                     cached = await _reuse_cached_outputs(self.exec_context, self.workflow_node, self.output_keys, cache_key)
                 if cached is not None:
                     await self.exec_context.registry.set_node_completed(
@@ -137,7 +137,7 @@ class FoundryRyvencoreNode(rc.Node):
                 continue
             port = self.node_spec.inputs[key]
             source_payload = data.payload
-            payload = convert_payload(source_payload, port.type_name)
+            payload = source_payload if self.workflow_node.type == "Merge" else convert_payload(source_payload, port.type_name)
             if port.type_name == "Batch Structure":
                 payload = payload.model_copy(
                     update={"metadata": {**payload.metadata, "effective_type": source_payload.type_name}}

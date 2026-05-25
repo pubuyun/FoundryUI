@@ -32,18 +32,6 @@ async def run_rfd3_design(
 ) -> list[Path]:
     out_dir = work_dir / "rfd3_outputs"
     input_json = work_dir / "sm_binder_design.json"
-    ckpt_path = checkpoint_path("FOUNDRYUI_RFD3_CKPT", "models/rfd3_latest.ckpt")
-    if not ckpt_path.exists():
-        raise BackendError(
-            make_error( 
-                "MISSING_RFD3_CHECKPOINT",
-                "RFDiffusion3 checkpoint file was not found.",
-                run_id=run_id,
-                node_id=node_id,
-                node_type=node_type,
-                details={"checkpoint_path": str(ckpt_path), "env_var": "FOUNDRYUI_RFD3_CKPT"},
-            )
-        )
     payload = {
         "foundryui_design": {
             "input": str(ligand_path),
@@ -54,6 +42,48 @@ async def run_rfd3_design(
             "select_exposed": {ligand_residue_name: ",".join(select_exposed)},
         }
     }
+    return await run_rfd3_payload(
+        run_id=run_id,
+        node_id=node_id,
+        node_type=node_type,
+        work_dir=work_dir,
+        out_dir=out_dir,
+        input_json=input_json,
+        payload=payload,
+        n_batches=n_batches,
+        diffusion_batch_size=diffusion_batch_size,
+        registry=registry,
+        store=store,
+    )
+
+
+async def run_rfd3_payload(
+    *,
+    run_id: str,
+    node_id: str,
+    node_type: str,
+    work_dir: Path,
+    out_dir: Path,
+    input_json: Path,
+    payload: dict,
+    n_batches: int,
+    diffusion_batch_size: int,
+    registry: RunRegistry,
+    store: ArtifactStore,
+    overrides: list[str] | None = None,
+) -> list[Path]:
+    ckpt_path = checkpoint_path("FOUNDRYUI_RFD3_CKPT", "models/rfd3_latest.ckpt")
+    if not ckpt_path.exists():
+        raise BackendError(
+            make_error(
+                "MISSING_RFD3_CHECKPOINT",
+                "RFDiffusion3 checkpoint file was not found.",
+                run_id=run_id,
+                node_id=node_id,
+                node_type=node_type,
+                details={"checkpoint_path": str(ckpt_path), "env_var": "FOUNDRYUI_RFD3_CKPT"},
+            )
+        )
     input_json.write_text(json.dumps(payload, indent=2))
     command = [
         executable("FOUNDRYUI_RFD3_BIN", "rfd3"),
@@ -63,6 +93,7 @@ async def run_rfd3_design(
         f"ckpt_path={ckpt_path}",
         f"n_batches={n_batches}",
         f"diffusion_batch_size={diffusion_batch_size}",
+        *(overrides or []),
     ]
     await run_command_streaming(command=command, cwd=work_dir, run_id=run_id, node_id=node_id, node_type=node_type, registry=registry, store=store)
     return _standardize_rfd3_structures(out_dir, work_dir / "rfd3_pdb_outputs")
@@ -70,13 +101,21 @@ async def run_rfd3_design(
 
 def _standardize_rfd3_structures(out_dir: Path, pdb_dir: Path) -> list[Path]:
     pdb_paths = collect_files(out_dir, (".pdb",))
+    cif_paths = collect_files(out_dir, (".cif",))
     cif_gz_paths = collect_files(out_dir, (".cif.gz",))
-    if not cif_gz_paths:
+    if not cif_gz_paths and not cif_paths:
         return pdb_paths
 
     pdb_dir.mkdir(parents=True, exist_ok=True)
     parser = MMCIFParser(QUIET=True)
     converted_paths: list[Path] = []
+    for cif_path in cif_paths:
+        pdb_path = pdb_dir / f"{cif_path.name.removesuffix('.cif')}.pdb"
+        structure = parser.get_structure(cif_path.stem, str(cif_path))
+        writer = PDBIO()
+        writer.set_structure(structure)
+        writer.save(str(pdb_path))
+        converted_paths.append(pdb_path)
     for cif_gz_path in cif_gz_paths:
         pdb_path = pdb_dir / f"{cif_gz_path.name.removesuffix('.cif.gz')}.pdb"
         with gzip.open(cif_gz_path, "rt") as handle:

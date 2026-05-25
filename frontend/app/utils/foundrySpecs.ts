@@ -3,6 +3,7 @@ export type PortType =
   | "Protein"
   | "List of Residues"
   | "List of Atoms"
+  | "Residues Atoms List"
   | "Batch Protein"
   | "Batch Ligand"
   | "Batch Protein with Ligand"
@@ -28,7 +29,7 @@ export interface OptionSpec {
   accept?: string;
   min?: number;
   max?: number;
-  viewerMode?: "residue" | "atom" | "structure" | "batchStructure" | "sequence";
+  viewerMode?: "residue" | "atom" | "proteinAtom" | "chain" | "structure" | "batchStructure" | "sequence";
 }
 
 export interface FoundryNodeSpec {
@@ -67,6 +68,7 @@ export const typeDetails: Array<{ name: PortType; detail: string }> = [
   { name: "Protein", detail: "Single protein PDB payload" },
   { name: "List of Residues", detail: 'Residue ids such as "A58,A103"' },
   { name: "List of Atoms", detail: 'Ligand atom ids such as "C1,O2"' },
+  { name: "Residues Atoms List", detail: "Residue-to-atom selections" },
   { name: "Batch Protein", detail: "Protein model collection" },
   { name: "Batch Ligand", detail: "Ligand conformer collection" },
   { name: "Batch Protein with Ligand", detail: "Strict protein-ligand complex collection" },
@@ -80,6 +82,7 @@ export const colorsByType: Record<PortType, string> = {
   Protein: "#4678d4",
   "List of Residues": "#9062ce",
   "List of Atoms": "#e2559b",
+  "Residues Atoms List": "#b36b2c",
   "Batch Protein": "#2368ad",
   "Batch Ligand": "#168b69",
   "Batch Protein with Ligand": "#c74b67",
@@ -123,6 +126,35 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     outputs: [{ key: "atoms", label: "List of Atoms", type: "List of Atoms" }],
   },
   {
+    type: "ResidueAtomSelector",
+    title: "Residue Atom Selector",
+    category: "Selector",
+    description: "Pause at runtime and select protein atoms from selected residues.",
+    requiresRuntimeInput: true,
+    inputs: [
+      { key: "residues", label: "List of Residues", type: "List of Residues" },
+      { key: "protein", label: "Protein", type: "Protein" },
+    ],
+    options: [
+      { key: "proteinAtoms", label: "Protein atoms", kind: "textarea", value: "" },
+      { key: "viewer", label: "3D Viewer protein atom selector", kind: "viewer", value: "Open", viewerMode: "proteinAtom" },
+    ],
+    outputs: [{ key: "proteinAtoms", label: "Residues Atoms List", type: "Residues Atoms List" }],
+  },
+  {
+    type: "ProteinChainSelector",
+    title: "Protein Chain Selector",
+    category: "Selector",
+    description: "Pause at runtime and keep selected protein chains.",
+    requiresRuntimeInput: true,
+    inputs: [{ key: "batchProtein", label: "Batch Protein", type: "Batch Protein" }],
+    options: [
+      { key: "chains", label: "Chains", kind: "text", value: "" },
+      { key: "viewer", label: "3D Viewer chain selector", kind: "viewer", value: "Open", viewerMode: "chain" },
+    ],
+    outputs: [{ key: "batchProtein", label: "Batch Protein", type: "Batch Protein" }],
+  },
+  {
     type: "LigandInput",
     title: "Ligand Input",
     category: "Structure Inputs",
@@ -145,6 +177,17 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     outputs: [{ key: "batchProtein", label: "Batch Protein", type: "Batch Protein" }],
   },
   {
+    type: "ProteinWithLigandInput",
+    title: "Protein With Ligand Input",
+    category: "Structure Inputs",
+    description: "Manual protein-ligand complex input from PDB files.",
+    options: [
+      { key: "file", label: "Upload File", kind: "file", value: "", accept: ".pdb" },
+      { key: "viewer", label: "File Selector + 3D Viewer", kind: "viewer", value: "Open", viewerMode: "batchStructure" },
+    ],
+    outputs: [{ key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" }],
+  },
+  {
     type: "SequenceInput",
     title: "Sequence Input",
     category: "Structure Inputs",
@@ -165,6 +208,44 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     ],
     options: [
       { key: "length", label: "length", kind: "text", value: "50-200" },
+      { key: "nBatches", label: "n_batches", kind: "int", value: 1, min: 1 },
+      { key: "diffusionBatchSize", label: "diffusion_batch_size", kind: "int", value: 5, min: 1 },
+    ],
+    outputs: [{ key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" }],
+  },
+  {
+    type: "RFDiffusionProteinBinder",
+    title: "RFDiffusion3 Protein Binder",
+    category: "Generation",
+    description: "RFdiffusion3 protein binder generation using hotspot atoms.",
+    inputs: [
+      { key: "protein", label: "Protein", type: "Protein" },
+      { key: "selectHotspots", label: "select_hotspots", type: "Residues Atoms List" },
+    ],
+    options: [
+      { key: "dialect", label: "dialect", kind: "int", value: 2, min: 1 },
+      { key: "contig", label: "contig", kind: "text", value: "40-120,/0,A1-100" },
+      { key: "isNonLoopy", label: "is_non_loopy", kind: "bool", value: true },
+      { key: "nBatches", label: "n_batches", kind: "int", value: 1, min: 1 },
+      { key: "diffusionBatchSize", label: "diffusion_batch_size", kind: "int", value: 5, min: 1 },
+    ],
+    outputs: [{ key: "batchProtein", label: "Batch Protein", type: "Batch Protein" }],
+  },
+  {
+    type: "RFDiffusionEnzyme",
+    title: "RFDiffusion3 Enzyme",
+    category: "Generation",
+    description: "RFdiffusion3 enzyme design from a protein-ligand theozyme.",
+    inputs: [
+      { key: "complex", label: "Protein with Ligand", type: "Batch Protein with Ligand" },
+      { key: "ligand", label: "ligand residues", type: "List of Residues" },
+      { key: "unindex", label: "unindex residues", type: "List of Residues" },
+      { key: "selectFixedAtoms", label: "select_fixed_atoms", type: "Residues Atoms List" },
+      { key: "selectBuried", label: "select_buried", type: "Residues Atoms List" },
+      { key: "selectExposed", label: "select_exposed", type: "Residues Atoms List" },
+    ],
+    options: [
+      { key: "length", label: "length", kind: "text", value: "180-200" },
       { key: "nBatches", label: "n_batches", kind: "int", value: 1, min: 1 },
       { key: "diffusionBatchSize", label: "diffusion_batch_size", kind: "int", value: 5, min: 1 },
     ],
@@ -309,10 +390,10 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     type: "Merge",
     title: "Merge",
     category: "Util",
-    description: "Merge batch protein and batch/single ligand into complexes.",
+    description: "Merge two structure inputs into chain-separated structures.",
     inputs: [
-      { key: "ligand", label: "(Batch) Ligand", type: "Ligand" },
-      { key: "batchProtein", label: "Batch Protein", type: "Batch Protein" },
+      { key: "inputA", label: "Input A", type: "Batch Protein (With Ligand)" },
+      { key: "inputB", label: "Input B", type: "Batch Protein (With Ligand)" },
     ],
     outputs: [{ key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" }],
   },

@@ -1,14 +1,21 @@
 import asyncio
+import os
+import signal
+import sys
 
 from backend.artifacts.registry import artifact_store
 from backend.runtime.registry import run_registry
 from backend.schemas.payloads import TypedPayload
 from backend.runtime.runner import run_workflow
+from backend.runtime.subprocesses import run_command_streaming
 from backend.schemas.workflow import RunCreateRequest
 from backend.bio.sequences import pdb_to_sequence
 from backend.bio.ligand import ligand_matches_smiles_chirality, smiles_to_pdb
 from backend.nodes.common import ExecutionContext
 from backend.nodes.filters import filter_atoms_chirality, filter_chirality
+from backend.nodes.generation import rfdiffusion_enzyme, rfdiffusion_protein_binder
+from backend.nodes.selectors import protein_atom_selector, protein_chain_selector
+from backend.nodes.utils import merge
 from backend.schemas.workflow import WorkflowNode
 
 
@@ -16,6 +23,11 @@ PDB = """ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00 40.00     
 ATOM      2  CA  GLY A   1       1.000   0.000   0.000  1.00 40.00           C
 ATOM      3  C   GLY A   1       1.000   1.000   0.000  1.00 40.00           C
 ATOM      4  O   GLY A   1       1.000   1.500   1.000  1.00 40.00           O
+END
+"""
+
+PDB_CHAIN_B = """ATOM      1  N   GLY B   2       0.000   0.000   0.000  1.00 40.00           N
+ATOM      2  CA  GLY B   2       1.000   0.000   0.000  1.00 40.00           C
 END
 """
 
@@ -257,3 +269,185 @@ def test_ligand_matches_smiles_chirality() -> None:
 
     assert ligand_matches_smiles_chirality(ligand, "F[C@](Cl)(Br)I")
     assert not ligand_matches_smiles_chirality(different_ligand, "F[C@](Cl)(Br)I")
+
+
+def test_protein_atom_selector_waits_and_writes_atom_map() -> None:
+    async def execute() -> None:
+        run_id = "run_test_protein_atom_selector"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        node = WorkflowNode(id="protein_atoms", type="ResidueAtomSelector", options={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        protein_artifact = artifact_store.write_text(run_id=run_id, path=root / "protein.pdb", content=PDB, payload_type="Protein")
+        task = asyncio.create_task(
+            protein_atom_selector(
+                ctx,
+                node,
+                {
+                    "residues": TypedPayload(type_name="List of Residues", item_count=1, data=["A1"]),
+                    "protein": TypedPayload(type_name="Protein", item_count=1, artifact_ids=[protein_artifact.artifact_id], paths=[protein_artifact.path], data=PDB),
+                },
+            )
+        )
+        for _ in range(20):
+            if run_registry.get(run_id).pending_inputs:
+                break
+            await asyncio.sleep(0.01)
+        assert await run_registry.submit_node_input(run_id, "protein_atoms", {"proteinAtoms": '{"A1": "CA,O"}'})
+        result = await task
+
+        assert result["proteinAtoms"].type_name == "Residues Atoms List"
+        assert result["proteinAtoms"].data == {"A1": "CA,O"}
+
+    asyncio.run(execute())
+
+
+def test_protein_chain_selector_filters_selected_chains() -> None:
+    async def execute() -> None:
+        run_id = "run_test_protein_chain_selector"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        node = WorkflowNode(id="chain_selector", type="ProteinChainSelector", options={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        protein = PDB.replace("END\n", "") + PDB_CHAIN_B
+        artifact = artifact_store.write_text(run_id=run_id, path=root / "protein.pdb", content=protein, payload_type="Batch Protein")
+        task = asyncio.create_task(
+            protein_chain_selector(
+                ctx,
+                node,
+                {"batchProtein": TypedPayload(type_name="Batch Protein", item_count=1, artifact_ids=[artifact.artifact_id], paths=[artifact.path], data=[protein])},
+            )
+        )
+        for _ in range(20):
+            if run_registry.get(run_id).pending_inputs:
+                break
+            await asyncio.sleep(0.01)
+        assert await run_registry.submit_node_input(run_id, "chain_selector", {"chains": "B"})
+        result = await task
+
+        assert " B   2" in result["batchProtein"].data[0]
+        assert " A   1" not in result["batchProtein"].data[0]
+
+    asyncio.run(execute())
+
+
+def test_merge_single_to_batch_rechains_structures() -> None:
+    async def execute() -> None:
+        run_id = "run_test_merge_single_to_batch"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        protein_a = artifact_store.write_text(run_id=run_id, path=root / "a.pdb", content=PDB, payload_type="Batch Protein")
+        protein_b = artifact_store.write_text(run_id=run_id, path=root / "b.pdb", content=PDB_CHAIN_B, payload_type="Batch Protein")
+        ligand = artifact_store.write_text(run_id=run_id, path=root / "ligand.pdb", content=LIGAND_ABC, payload_type="Ligand")
+        result = await merge(
+            ctx,
+            WorkflowNode(id="merge", type="Merge"),
+            {
+                "inputA": TypedPayload(type_name="Batch Protein", item_count=2, paths=[protein_a.path, protein_b.path], data=[PDB, PDB_CHAIN_B]),
+                "inputB": TypedPayload(type_name="Ligand", item_count=1, paths=[ligand.path], data=LIGAND_ABC),
+            },
+        )
+
+        assert result["complexes"].item_count == 2
+        assert result["complexes"].type_name == "Batch Protein (With Ligand)"
+        assert " A   1" in result["complexes"].data[0]
+        assert " B   1" in result["complexes"].data[0]
+
+    asyncio.run(execute())
+
+
+def test_rfdiffusion_nodes_build_expected_json(monkeypatch) -> None:
+    async def execute() -> None:
+        run_id = "run_test_rfd3_json"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=2)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        protein = artifact_store.write_text(run_id=run_id, path=root / "protein.pdb", content=PDB, payload_type="Protein")
+        complex_artifact = artifact_store.write_text(run_id=run_id, path=root / "complex.pdb", content=PDB + LIGAND_ABC, payload_type="Batch Protein with Ligand")
+        captured = []
+
+        async def fake_run_rfd3_payload(**kwargs):
+            captured.append(kwargs["payload"])
+            output = kwargs["work_dir"] / "fake_output.pdb"
+            output.write_text(PDB)
+            return [output]
+
+        monkeypatch.setattr("backend.nodes.generation.run_rfd3_payload", fake_run_rfd3_payload)
+        await rfdiffusion_protein_binder(
+            ctx,
+            WorkflowNode(id="binder", type="RFDiffusionProteinBinder", options={"contig": "40-120,/0,E6-155"}),
+            {
+                "protein": TypedPayload(type_name="Protein", item_count=1, paths=[protein.path], data=PDB),
+                "selectHotspots": TypedPayload(type_name="Residues Atoms List", data={"E64": "CD2,CZ"}),
+            },
+        )
+        await rfdiffusion_enzyme(
+            ctx,
+            WorkflowNode(id="enzyme", type="RFDiffusionEnzyme", options={"length": "180-200"}),
+            {
+                "complex": TypedPayload(type_name="Batch Protein with Ligand", item_count=1, paths=[complex_artifact.path], data=[PDB + LIGAND_ABC]),
+                "ligand": TypedPayload(type_name="List of Residues", data=["ABC"]),
+                "unindex": TypedPayload(type_name="List of Residues", data=["A1"]),
+                "selectFixedAtoms": TypedPayload(type_name="Residues Atoms List", data={"A1": "CA"}),
+                "selectBuried": TypedPayload(type_name="Residues Atoms List", data={"ABC": "C1"}),
+                "selectExposed": TypedPayload(type_name="Residues Atoms List", data={"ABC": ""}),
+            },
+        )
+
+        assert captured[0]["foundryui_protein_binder"]["select_hotspots"] == {"E64": "CD2,CZ"}
+        assert captured[0]["foundryui_protein_binder"]["infer_ori_strategy"] == "hotspots"
+        assert captured[1]["foundryui_enzyme"]["ligand"] == "ABC"
+        assert captured[1]["foundryui_enzyme"]["select_fixed_atoms"] == {"A1": "CA"}
+
+    asyncio.run(execute())
+
+
+def test_subprocess_stop_kills_child_process_group() -> None:
+    async def execute() -> None:
+        run_id = "run_test_stop_process_group"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        marker = artifact_store.run_dir(run_id) / "child.pid"
+        script = (
+            "import os, signal, subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            f"open({str(marker)!r}, 'w').write(str(child.pid))\n"
+            "sys.stdout.write('started\\n'); sys.stdout.flush()\n"
+            "time.sleep(60)\n"
+        )
+        task = asyncio.create_task(
+            run_command_streaming(
+                command=[sys.executable, "-c", script],
+                cwd=artifact_store.run_dir(run_id),
+                run_id=run_id,
+                node_id="cmd",
+                node_type="TestCommand",
+                registry=run_registry,
+                store=artifact_store,
+            )
+        )
+        for _ in range(100):
+            if marker.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert marker.exists()
+        child_pid = int(marker.read_text())
+        assert await run_registry.request_cancel(run_id)
+        try:
+            await task
+        except Exception as exc:
+            assert getattr(exc, "error").code == "RUN_CANCELLED"
+        await asyncio.sleep(0.1)
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            return
+        os.kill(child_pid, signal.SIGKILL)
+        raise AssertionError("child process survived run cancellation")
+
+    asyncio.run(execute())

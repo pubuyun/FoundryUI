@@ -26,6 +26,7 @@ from backend.schemas.errors import make_error
 from backend.schemas.payloads import TypedPayload
 from backend.schemas.workflow import EmbeddedUpload, FoundryWorkflowDocument, RunCreateRequest, WorkflowGraph, WorkflowValidationResponse
 from backend.workflow.validation import validate_workflow
+from backend.nodes.common import option_file_tokens
 
 
 app = FastAPI(title="FoundryUI Backend")
@@ -335,17 +336,70 @@ def _validate_run_uploads(request: RunCreateRequest):
     uploads = request.embedded_uploads()
     for node in graph.nodes:
         if node.type == "LigandInput":
-            if not uploads.get(node.id) and not _has_stored_file_refs(str(node.options.get("file", ""))):
-                errors.append(make_error("MISSING_LIGAND_FILE", "LigandInput requires uploaded PDB content or upload file ids.", node_id=node.id, node_type=node.type, option_key="file"))
+            node_errors = _validate_input_node_files(node, uploads, {"pdb"}, "LigandInput requires uploaded PDB content or upload file ids.", "MISSING_LIGAND_FILE", "INVALID_LIGAND_FILE")
+            if node_errors:
+                errors.extend(node_errors)
         elif node.type == "ProteinInput":
-            if not uploads.get(node.id) and not _has_stored_file_refs(str(node.options.get("file", ""))):
-                errors.append(make_error("MISSING_PROTEIN_FILE", "ProteinInput requires uploaded PDB content or upload file ids.", node_id=node.id, node_type=node.type, option_key="file"))
+            node_errors = _validate_input_node_files(node, uploads, {"pdb"}, "ProteinInput requires uploaded PDB content or upload file ids.", "MISSING_PROTEIN_FILE", "INVALID_PROTEIN_FILE")
+            if node_errors:
+                errors.extend(node_errors)
+        elif node.type == "ProteinWithLigandInput":
+            node_errors = _validate_input_node_files(node, uploads, {"pdb"}, "ProteinWithLigandInput requires uploaded PDB content or upload file ids.", "MISSING_COMPLEX_FILE", "INVALID_COMPLEX_FILE")
+            if node_errors:
+                errors.extend(node_errors)
         elif node.type == "SequenceInput":
-            if not uploads.get(node.id) and not _has_stored_file_refs(str(node.options.get("file", ""))):
-                errors.append(make_error("MISSING_FASTA_FILE", "SequenceInput requires uploaded FASTA content or upload file ids.", node_id=node.id, node_type=node.type, option_key="file"))
+            node_errors = _validate_input_node_files(node, uploads, {"fasta", "fa"}, "SequenceInput requires uploaded FASTA content or upload file ids.", "MISSING_FASTA_FILE", "INVALID_FASTA_FILE")
+            if node_errors:
+                errors.extend(node_errors)
     return errors
 
 
-def _has_stored_file_refs(value: str) -> bool:
-    refs = [part.strip() for part in value.split(",") if part.strip()]
-    return bool(refs) and all(upload_store.get(ref) is not None for ref in refs)
+def _validate_input_node_files(node, uploads: dict[str, list[EmbeddedUpload]], allowed_types: set[str], missing_message: str, missing_code: str, invalid_code: str):
+    errors = []
+    refs = option_file_tokens(node)
+    embedded = _embedded_uploads_for_node(node, uploads, refs)
+    if not embedded and not refs:
+        return [make_error(missing_code, missing_message, node_id=node.id, node_type=node.type, option_key="file")]
+    for item in embedded:
+        file_type = (item.type or _detect_type(item.name)).lower()
+        if file_type not in allowed_types:
+            errors.append(make_error(invalid_code, f"{node.type} received an invalid uploaded file type.", node_id=node.id, node_type=node.type, option_key="file", details={"file": item.name, "file_type": file_type, "allowed_types": sorted(allowed_types)}))
+            continue
+        try:
+            _validate_upload_content_for_run(file_type, item.content)
+        except ValueError as exc:
+            errors.append(make_error(invalid_code, str(exc), node_id=node.id, node_type=node.type, option_key="file", details={"file": item.name, "file_type": file_type}))
+    for ref in refs:
+        stored = upload_store.get(ref)
+        if stored is None and any(item.name == ref for item in embedded):
+            continue
+        if stored is None:
+            errors.append(make_error(missing_code, f"{node.type} references an unknown uploaded file id.", node_id=node.id, node_type=node.type, option_key="file", details={"file_id": ref}))
+            continue
+        if stored.type not in allowed_types:
+            errors.append(make_error(invalid_code, f"{node.type} references an invalid uploaded file type.", node_id=node.id, node_type=node.type, option_key="file", details={"file_id": ref, "file": stored.name, "file_type": stored.type, "allowed_types": sorted(allowed_types)}))
+            continue
+        try:
+            _validate_upload_content_for_run(stored.type, stored.path.read_text())
+        except ValueError as exc:
+            errors.append(make_error(invalid_code, str(exc), node_id=node.id, node_type=node.type, option_key="file", details={"file_id": ref, "file": stored.name, "file_type": stored.type}))
+    return errors
+
+
+def _embedded_uploads_for_node(node, uploads: dict[str, list[EmbeddedUpload]], refs: list[str]) -> list[EmbeddedUpload]:
+    embedded = uploads.get(node.id) or []
+    if embedded:
+        return embedded
+    file_names = set(refs)
+    if not file_names:
+        return []
+    return [item for items in uploads.values() for item in items if item.name in file_names]
+
+
+def _validate_upload_content_for_run(file_type: str, content: str) -> None:
+    if file_type == "pdb":
+        validate_pdb(content)
+    elif file_type in {"fasta", "fa"}:
+        parse_fasta(content)
+    else:
+        raise ValueError("Unsupported upload type.")

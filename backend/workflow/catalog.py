@@ -57,6 +57,23 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         options=_options([OptionSpec("atoms", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
         outputs=_ports([PortSpec("atoms", "List of Atoms")]),
     ),
+    "ResidueAtomSelector": NodeSpec(
+        "ResidueAtomSelector",
+        inputs=_ports(
+            [
+                PortSpec("residues", "List of Residues"),
+                PortSpec("protein", "Protein"),
+            ]
+        ),
+        options=_options([OptionSpec("proteinAtoms", "textarea", ""), OptionSpec("viewer", "viewer", "Open")]),
+        outputs=_ports([PortSpec("proteinAtoms", "Residues Atoms List")]),
+    ),
+    "ProteinChainSelector": NodeSpec(
+        "ProteinChainSelector",
+        inputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
+        options=_options([OptionSpec("chains", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
+        outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
+    ),
     "LigandInput": NodeSpec(
         "LigandInput",
         options=_options(
@@ -71,6 +88,11 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         "ProteinInput",
         options=_options([OptionSpec("file", "file", ""), OptionSpec("viewer", "viewer", "Open")]),
         outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
+    ),
+    "ProteinWithLigandInput": NodeSpec(
+        "ProteinWithLigandInput",
+        options=_options([OptionSpec("file", "file", ""), OptionSpec("viewer", "viewer", "Open")]),
+        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
     ),
     "SequenceInput": NodeSpec(
         "SequenceInput",
@@ -90,6 +112,41 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         options=_options(
             [
                 OptionSpec("length", "text", "50-200", required=True),
+                OptionSpec("nBatches", "int", 1, min_value=1),
+                OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
+            ]
+        ),
+        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
+    ),
+    "RFDiffusionProteinBinder": NodeSpec(
+        "RFDiffusionProteinBinder",
+        inputs=_ports([PortSpec("protein", "Protein"), PortSpec("selectHotspots", "Residues Atoms List")]),
+        options=_options(
+            [
+                OptionSpec("dialect", "int", 2, min_value=1),
+                OptionSpec("contig", "text", "40-120,/0,A1-100", required=True),
+                OptionSpec("isNonLoopy", "bool", True),
+                OptionSpec("nBatches", "int", 1, min_value=1),
+                OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
+            ]
+        ),
+        outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
+    ),
+    "RFDiffusionEnzyme": NodeSpec(
+        "RFDiffusionEnzyme",
+        inputs=_ports(
+            [
+                PortSpec("complex", "Batch Protein with Ligand"),
+                PortSpec("ligand", "List of Residues"),
+                PortSpec("unindex", "List of Residues"),
+                PortSpec("selectFixedAtoms", "Residues Atoms List"),
+                PortSpec("selectBuried", "Residues Atoms List"),
+                PortSpec("selectExposed", "Residues Atoms List"),
+            ]
+        ),
+        options=_options(
+            [
+                OptionSpec("length", "text", "180-200", required=True),
                 OptionSpec("nBatches", "int", 1, min_value=1),
                 OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
             ]
@@ -218,7 +275,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
     ),
     "Merge": NodeSpec(
         "Merge",
-        inputs=_ports([PortSpec("ligand", "Ligand"), PortSpec("batchProtein", "Batch Protein")]),
+        inputs=_ports([PortSpec("inputA", "Batch Protein (With Ligand)"), PortSpec("inputB", "Batch Protein (With Ligand)")]),
         outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)")]),
     ),
     "Split": NodeSpec(
@@ -268,4 +325,6 @@ NODE_CATALOG: dict[str, NodeSpec] = {
 def spec_for(node_type: str) -> NodeSpec | None:
     if node_type == "RosettaFold3":
         return NODE_CATALOG["RosettaFold3"]
+    if node_type == "ProteinAtomSelector":
+        return NODE_CATALOG["ResidueAtomSelector"]
     return NODE_CATALOG.get(node_type)

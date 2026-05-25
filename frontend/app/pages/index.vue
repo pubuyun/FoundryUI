@@ -133,7 +133,9 @@ const workflowPresets = ref<WorkflowPreset[]>([]);
 const selectedWorkflowPreset = ref("");
 const errorNodeIds = ref(new Set<string>());
 const cachedNodeIds = ref(new Set<string>());
+const pendingInputNodeIds = ref(new Set<string>());
 const eventSource = ref<EventSource | null>(null);
+const nodeElements = new Map<string, HTMLElement>();
 const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : runState.value.toUpperCase()));
 const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
 const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
@@ -328,11 +330,17 @@ function registerTypes() {
   typeRegistry.get("Protein")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Ligand")?.addConversion(typeRegistry.get("Batch Ligand")!, (value) => value);
   typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
+  typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Batch Protein with Ligand")!, (value) => value);
   typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
   typeRegistry.get("Batch Ligand")?.addConversion(typeRegistry.get("Ligand")!, (value) => value);
   typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Protein")!, (value) => value);
+  typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Protein")!, (value) => value);
+  typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Protein")!, (value) => value);
+  typeRegistry.get("Ligand")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
+  typeRegistry.get("Batch Ligand")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
+  typeRegistry.get("Protein")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
 
   interfaceTypes.addTypes(...typeRegistry.values());
 }
@@ -391,6 +399,8 @@ function nodeByModal() {
 function selectorInterface(node = nodeByModal()) {
   if (!node) return undefined;
   if (pendingRunInput.value?.fields.includes("chiralityTargets")) return node.inputs.chiralityTargets as NodeInterfaceTypeBase<string> | undefined;
+  if (pendingRunInput.value?.fields.includes("proteinAtoms") || viewerModal.mode === "proteinAtom") return node.inputs.proteinAtoms as NodeInterfaceTypeBase<string> | undefined;
+  if (pendingRunInput.value?.fields.includes("chains") || viewerModal.mode === "chain") return node.inputs.chains as NodeInterfaceTypeBase<string> | undefined;
   if (viewerModal.mode === "atom") return node.inputs.atoms as NodeInterfaceTypeBase<string> | undefined;
   if (viewerModal.mode === "residue") return node.inputs.residues as NodeInterfaceTypeBase<string> | undefined;
   return undefined;
@@ -420,9 +430,86 @@ function atomId(atom: any) {
 }
 
 function residueId(atom: any) {
+  const resn = String(atom.resn || atom.residue || "").trim();
+  if (resn && !STANDARD_RESIDUES.has(resn.toUpperCase())) return resn;
   const chain = atom.chain || "";
   const resi = atom.resi ?? atom.residueIndex ?? "";
   return `${chain}${resi}`;
+}
+
+const STANDARD_RESIDUES = new Set([
+  "ALA",
+  "ARG",
+  "ASN",
+  "ASP",
+  "CYS",
+  "GLN",
+  "GLU",
+  "GLY",
+  "HIS",
+  "ILE",
+  "LEU",
+  "LYS",
+  "MET",
+  "PHE",
+  "PRO",
+  "SER",
+  "THR",
+  "TRP",
+  "TYR",
+  "VAL",
+]);
+
+function residueSelection(residue: string) {
+  if (/^[A-Za-z]\d+$/.test(residue)) {
+    return { chain: residue[0], resi: Number(residue.slice(1)) };
+  }
+  return { resn: residue };
+}
+
+function parseProteinAtomMap(value = selectorValue()): Record<string, string[]> {
+  const text = value.trim();
+  if (!text) return {};
+  try {
+    const data = JSON.parse(text);
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      return Object.fromEntries(
+        Object.entries(data)
+          .map(([residue, atoms]) => [
+            residue.trim(),
+            Array.isArray(atoms)
+              ? atoms.map((atom) => String(atom).trim()).filter(Boolean)
+              : String(atoms ?? "")
+                  .split(",")
+                  .map((atom) => atom.trim())
+                  .filter(Boolean),
+          ])
+          .filter(([residue, atoms]) => residue && (atoms as string[]).length),
+      );
+    }
+  } catch {
+    // Fall through to "A56:CG,OH; A115:CG" parsing.
+  }
+  const parsed: Record<string, string[]> = {};
+  text
+    .replace(/\n/g, ";")
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .forEach((entry) => {
+      const [residue, atoms] = entry.split(":", 2);
+      const atomNames = String(atoms ?? "")
+        .split(",")
+        .map((atom) => atom.trim())
+        .filter(Boolean);
+      if (residue?.trim() && atomNames.length) parsed[residue.trim()] = atomNames;
+    });
+  return parsed;
+}
+
+function formatProteinAtomMap(value: Record<string, string[]>) {
+  const compact = Object.fromEntries(Object.entries(value).filter(([, atoms]) => atoms.length).map(([residue, atoms]) => [residue, [...new Set(atoms)].join(",")]));
+  return JSON.stringify(compact, null, 2);
 }
 
 function toggleSelectorItem(value: string) {
@@ -436,6 +523,17 @@ function toggleSelectorItem(value: string) {
   const values = parseSelectorList();
   const next = values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
   setSelectorValue(next.join(","));
+}
+
+function toggleProteinAtom(atom: any) {
+  const residue = residueId(atom);
+  const name = atomId(atom);
+  if (!residue || !name) return;
+  const selected = parseProteinAtomMap();
+  const atoms = selected[residue] ?? [];
+  selected[residue] = atoms.includes(name) ? atoms.filter((atomName) => atomName !== name) : [...atoms, name];
+  if (!selected[residue].length) delete selected[residue];
+  setSelectorValue(formatProteinAtomMap(selected));
 }
 
 function parseChiralityTargets(value = selectorValue()) {
@@ -474,6 +572,7 @@ async function submitRuntimeInput() {
     values,
   });
   runMessage.value = "Input submitted";
+  setNodePendingInput(pendingRunInput.value.nodeId, false);
   pendingRunInput.value = null;
   closeViewer();
 }
@@ -548,6 +647,7 @@ function workflowDocument() {
 }
 
 function loadWorkflowDocument(document: any) {
+  migrateWorkflowDocument(document);
   const state = document.baklava ?? document.graph ?? document;
   const warnings = baklava.editor.load(state);
   Object.keys(uploadedByNode).forEach((nodeId) => {
@@ -559,6 +659,23 @@ function loadWorkflowDocument(document: any) {
   if (warnings.length) {
     console.warn("Workflow loaded with warnings", warnings);
   }
+}
+
+function migrateWorkflowDocument(document: any) {
+  const visit = (value: any) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    Object.entries(value).forEach(([key, nested]) => {
+      if (key === "type" && nested === "ProteinAtomSelector") value[key] = "ResidueAtomSelector";
+      if (key === "type" && nested === "Protein Atoms List") value[key] = "Residues Atoms List";
+      if (key === "name" && nested === "Protein Atoms List") value[key] = "Residues Atoms List";
+      visit(nested);
+    });
+  };
+  visit(document);
 }
 
 function saveWorkflow() {
@@ -671,6 +788,8 @@ function resetRunUi() {
   runLogs.value = [];
   validationErrors.value = [];
   runStatus.value = null;
+  pendingRunInput.value = null;
+  clearPendingInputs();
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -866,6 +985,7 @@ function handleRunEvent(event: RunEventPayload) {
     if (event.node_id) clearNodeError(event.node_id);
   } else if (event.event === "node_completed") {
     runMessage.value = `${event.node_type ?? "Node"} completed`;
+    if (event.node_id) setNodePendingInput(event.node_id, false);
     if (event.node_id && event.data?.cached) markNodeCached(event.node_id);
     void refreshRunStatus(event.run_id);
     void loadOutputs(event.run_id);
@@ -878,6 +998,7 @@ function handleRunEvent(event: RunEventPayload) {
   } else if (event.event === "error") {
     runState.value = "failed";
     runMessage.value = event.message ?? "Run failed";
+    if (event.node_id) setNodePendingInput(event.node_id, false);
     if (event.data?.error) validationErrors.value = [event.data.error, ...validationErrors.value];
     if (event.node_id) markNodeError(event.node_id);
     void refreshRunStatus(event.run_id);
@@ -886,6 +1007,7 @@ function handleRunEvent(event: RunEventPayload) {
   } else if (event.event === "completed") {
     runState.value = "completed";
     runMessage.value = "Run completed";
+    clearPendingInputs();
     void refreshRunStatus(event.run_id);
     void refreshRunFiles(event.run_id);
     void saveSessionDocument();
@@ -893,6 +1015,7 @@ function handleRunEvent(event: RunEventPayload) {
   } else if (event.event === "stopped") {
     runState.value = "stopped";
     runMessage.value = "Run stopped";
+    clearPendingInputs();
     void refreshRunStatus(event.run_id);
     void refreshRunFiles(event.run_id);
     closeRunEvents();
@@ -923,6 +1046,7 @@ function markNodeError(nodeId: string) {
   const next = new Set(errorNodeIds.value);
   next.add(nodeId);
   errorNodeIds.value = next;
+  applyNodeRuntimeClasses(nodeId);
 }
 
 function clearNodeError(nodeId: string) {
@@ -930,12 +1054,39 @@ function clearNodeError(nodeId: string) {
   const next = new Set(errorNodeIds.value);
   next.delete(nodeId);
   errorNodeIds.value = next;
+  applyNodeRuntimeClasses(nodeId);
 }
 
 function markNodeCached(nodeId: string) {
   const next = new Set(cachedNodeIds.value);
   next.add(nodeId);
   cachedNodeIds.value = next;
+  applyNodeRuntimeClasses(nodeId);
+}
+
+function setNodePendingInput(nodeId: string, pending: boolean) {
+  const next = new Set(pendingInputNodeIds.value);
+  if (pending) {
+    next.add(nodeId);
+  } else {
+    next.delete(nodeId);
+  }
+  pendingInputNodeIds.value = next;
+  applyNodeRuntimeClasses(nodeId);
+}
+
+function clearPendingInputs() {
+  const pending = [...pendingInputNodeIds.value];
+  pendingInputNodeIds.value = new Set();
+  pending.forEach(applyNodeRuntimeClasses);
+}
+
+function applyNodeRuntimeClasses(nodeId: string) {
+  const el = nodeElements.get(nodeId);
+  if (!el) return;
+  el.classList.toggle("foundry-node-pending-input", pendingInputNodeIds.value.has(nodeId));
+  el.classList.toggle("foundry-node-error", errorNodeIds.value.has(nodeId));
+  el.classList.toggle("foundry-node-cached", cachedNodeIds.value.has(nodeId));
 }
 
 async function openViewer(nodeId: string, title: string, mode: ViewerModal["mode"]) {
@@ -971,7 +1122,15 @@ async function openRuntimeInput(event: RunEventPayload) {
   viewerModal.open = true;
   viewerModal.nodeId = event.node_id;
   viewerModal.title = node?.title ?? event.node_type;
-  viewerModal.mode = event.node_type === "ResidueSelector" ? "residue" : "atom";
+  setNodePendingInput(event.node_id, true);
+  viewerModal.mode =
+    event.node_type === "ResidueSelector"
+      ? "residue"
+      : event.node_type === "ProteinAtomSelector" || event.node_type === "ResidueAtomSelector"
+        ? "proteinAtom"
+        : event.node_type === "ProteinChainSelector"
+          ? "chain"
+          : "atom";
   viewerModal.fileIndex = 0;
   viewerRuntimeFiles.value = await runtimeFilesFromPayloads(pendingRunInput.value.payloads);
   void nextTick(initializeViewer);
@@ -998,7 +1157,7 @@ function connectedSourceOutput(node: AbstractNode) {
 
 async function loadViewerRuntimeFiles(nodeId: string) {
   const node = baklava.editor.graph.findNodeById(nodeId);
-  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector"].includes(String(node.type))) return;
+  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector"].includes(String(node.type))) return;
   const output = connectedSourceOutput(node);
   if (!output?.artifact_ids.length) return;
   viewerRuntimeFiles.value = await runtimeFilesFromArtifactIds(output.artifact_ids, output.paths);
@@ -1061,7 +1220,7 @@ function renderViewer() {
     return;
   }
   viewer.addModel(file.content || proteinExample, "pdb");
-  if (viewerModal.style === "stick" || viewerModal.mode === "atom") {
+  if (viewerModal.style === "stick" || viewerModal.mode === "atom" || viewerModal.mode === "proteinAtom" || viewerModal.mode === "chain") {
     viewer.setStyle({}, { stick: { radius: 0.18 } });
   } else if (viewerModal.style === "surface") {
     viewer.setStyle({ hetflag: false }, { cartoon: { color: "lightgray" } });
@@ -1081,13 +1240,30 @@ function renderViewer() {
     });
   } else if (viewerModal.mode === "residue") {
     selected.forEach((residue) => {
-      const chain = residue[0];
-      const resi = Number(residue.slice(1));
-      viewer.addStyle({ chain, resi }, { stick: { color: "magenta", radius: 0.24 } });
+      viewer.addStyle(residueSelection(residue), { stick: { color: "magenta", radius: 0.24 } });
     });
     viewer.setClickable({}, true, (atom: any) => {
       const value = residueId(atom);
       if (value) toggleSelectorItem(value);
+    });
+  } else if (viewerModal.mode === "proteinAtom") {
+    const proteinAtoms = parseProteinAtomMap();
+    Object.entries(proteinAtoms).forEach(([residue, atoms]) => {
+      const residueSpec = residueSelection(residue);
+      atoms.forEach((atom) => {
+        viewer.addStyle({ ...residueSpec, atom }, { sphere: { color: "orange", radius: 0.42 } });
+      });
+    });
+    viewer.setClickable({}, true, (atom: any) => {
+      toggleProteinAtom(atom);
+    });
+  } else if (viewerModal.mode === "chain") {
+    selected.forEach((chain) => {
+      viewer.addStyle({ chain }, { stick: { color: "orange", radius: 0.26 } });
+    });
+    viewer.setClickable({}, true, (atom: any) => {
+      const chain = String(atom.chain || "").trim();
+      if (chain) toggleSelectorItem(chain);
     });
   }
   viewer.zoomTo();
@@ -1113,8 +1289,10 @@ baklava.hooks.renderInterface.subscribe("foundry-colors", ({ intf, el }) => {
 });
 
 baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
+  nodeElements.set(node.id, el);
   el.style.setProperty("--foundry-node-color", primaryNodeColor(node));
   el.classList.toggle("foundry-node-manual", nodeRequiresRuntimeInput(node));
+  el.classList.toggle("foundry-node-pending-input", pendingInputNodeIds.value.has(node.id));
   el.classList.toggle("foundry-node-error", errorNodeIds.value.has(node.id));
   el.classList.toggle("foundry-node-cached", cachedNodeIds.value.has(node.id));
   return { node, el };
@@ -1270,12 +1448,20 @@ onBeforeUnmount(() => {
               <option value="surface">Surface</option>
             </select>
           </label>
-          <label v-if="viewerModal.mode === 'atom' || viewerModal.mode === 'residue'" class="selector-value">
+          <label v-if="viewerModal.mode === 'atom' || viewerModal.mode === 'residue' || viewerModal.mode === 'chain'" class="selector-value">
             Selection
             <input
               :value="selectorValue()"
               spellcheck="false"
               @input="setSelectorValue(($event.target as HTMLInputElement).value)"
+            />
+          </label>
+          <label v-if="viewerModal.mode === 'proteinAtom'" class="selector-value">
+            Selection
+            <textarea
+              :value="selectorValue()"
+              spellcheck="false"
+              @input="setSelectorValue(($event.target as HTMLTextAreaElement).value)"
             />
           </label>
           <div v-if="pendingRunInput?.fields.includes('chiralityTargets')" class="chirality-targets">
@@ -1737,6 +1923,27 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
+.baklava-node.foundry-node-pending-input {
+  animation: foundryPendingInput 0.9s ease-in-out infinite;
+  border-top-color: #ffb86b !important;
+}
+
+.baklava-node.foundry-node-pending-input::after {
+  content: "input";
+  color: #ffd29a;
+}
+
+@keyframes foundryPendingInput {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.55), 0 0 0 1px rgba(255, 184, 107, 0.2);
+  }
+
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.9), 0 0 0 4px rgba(255, 184, 107, 0.38), 0 0 18px rgba(255, 184, 107, 0.45);
+  }
+}
+
 .node-file-upload {
   display: grid;
   gap: 5px;
@@ -1848,12 +2055,22 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.viewer-controls select {
+.viewer-controls select,
+.viewer-controls input,
+.viewer-controls textarea {
   height: 34px;
   border: 1px solid #c7d0dc;
   border-radius: 6px;
   background: #ffffff;
   color: #17202a;
+}
+
+.viewer-controls textarea {
+  min-height: 76px;
+  resize: vertical;
+  padding: 7px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 
 .chirality-targets {
