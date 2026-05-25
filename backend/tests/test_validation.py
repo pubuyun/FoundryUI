@@ -63,6 +63,41 @@ def test_validate_allows_flexible_complex_to_strict_complex_connection() -> None
     assert is_assignable("Batch Protein (With Ligand)", "Batch Protein with Ligand")
 
 
+def test_validate_allows_blank_filter_by_score_metric_until_runtime() -> None:
+    graph = WorkflowGraph.model_validate(
+        {
+            "nodes": [
+                {
+                    "id": "filter",
+                    "type": "FilterByScore",
+                    "inputs": {
+                        "structures": {"type": "Batch Protein (With Ligand)"},
+                        "score": {"type": "Score"},
+                    },
+                    "options": {"metric": "", "mode": "Is largest top", "threshold": 10},
+                    "outputs": {
+                        "structures": {"type": "Batch Protein (With Ligand)"},
+                        "score": {"type": "Score"},
+                    },
+                },
+                {
+                    "id": "viewer",
+                    "type": "PDBViewer",
+                    "inputs": {"structures": {"type": "Batch Structure"}},
+                },
+            ],
+            "connections": [
+                {
+                    "from": {"nodeId": "filter", "key": "structures", "type": "Batch Protein (With Ligand)"},
+                    "to": {"nodeId": "viewer", "key": "structures", "type": "Batch Structure"},
+                }
+            ],
+        }
+    )
+
+    assert [error.code for error in validate_workflow(graph)] == ["DISCONNECTED_REQUIRED_PORT", "DISCONNECTED_REQUIRED_PORT"]
+
+
 def test_run_validation_rejects_missing_input_uploads() -> None:
     request = RunCreateRequest.model_validate(
         {

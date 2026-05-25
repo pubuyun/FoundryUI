@@ -81,9 +81,7 @@ class FoundryRyvencoreNode(rc.Node):
                 self.workflow_node.type,
             )
             try:
-                cached = None
-                if self.workflow_node.type not in {"AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "FilterAtomsChirality"}:
-                    cached = await _reuse_cached_outputs(self.exec_context, self.workflow_node, self.output_keys, cache_key)
+                cached = await _reuse_cached_outputs(self.exec_context, self.workflow_node, self.output_keys, cache_key)
                 if cached is not None:
                     await self.exec_context.registry.set_node_completed(
                         self.exec_context.run_id,
@@ -142,7 +140,7 @@ class FoundryRyvencoreNode(rc.Node):
                 payload = payload.model_copy(
                     update={"metadata": {**payload.metadata, "effective_type": source_payload.type_name}}
                 )
-            if self.workflow_node.type in {"Merge", "SaveLigands"} and key == "ligand" and source_payload.type_name == "Batch Ligand":
+            if self.workflow_node.type in {"Merge", "SaveLigands", "RosettaFold", "RosettaFold3"} and key == "ligand" and source_payload.type_name == "Batch Ligand":
                 payload = source_payload
             grouped.setdefault(key, []).append(payload)
         for key, values in grouped.items():
@@ -310,6 +308,7 @@ def _combine_payloads(values: list[TypedPayload]) -> TypedPayload:
         artifact_ids.extend(payload.artifact_ids)
     metadata = dict(first.metadata)
     metadata["combined_from_types"] = [payload.type_name for payload in values]
+    metadata["combined_payloads"] = [payload.model_dump() for payload in values]
     return first.model_copy(
         update={
             "item_count": len(data) if data else sum(payload.item_count for payload in values),

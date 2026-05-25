@@ -5,6 +5,10 @@
             "file": "ligand-binder-denovo.fuiworkflow"
         },
         {
+            "label": "Enzyme Design Workflow",
+            "file": "enzymedesign.fuiworkflow"
+        },
+        {
             "label": "LigandMPNN",
             "file": "ligandmpnn.fuiworkflow"
         },
@@ -13,8 +17,12 @@
             "file": "proteinmpnn.fuiworkflow"
         },
         {
-            "label": "RosettaFold",
+            "label": "Rosetta Co-folding",
             "file": "rf3.fuiworkflow"
+        },
+        {
+            "label": "Protein Binder Workflow",
+            "file": "proteinbinder.fuiworkflow"
         }
-    ]
+       ]
 }

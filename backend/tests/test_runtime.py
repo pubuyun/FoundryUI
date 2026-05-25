@@ -9,11 +9,15 @@ from backend.schemas.payloads import TypedPayload
 from backend.runtime.runner import run_workflow
 from backend.runtime.subprocesses import run_command_streaming
 from backend.schemas.workflow import RunCreateRequest
+from backend.workflow.ryvencore_adapter import _node_cache_key, _reuse_cached_outputs
 from backend.bio.sequences import pdb_to_sequence
 from backend.bio.ligand import ligand_matches_smiles_chirality, smiles_to_pdb
 from backend.nodes.common import ExecutionContext
-from backend.nodes.filters import filter_atoms_chirality, filter_chirality
+from backend.nodes import folding as folding_module
+from backend.nodes.filters import filter_atoms_chirality, filter_by_score, filter_chirality
+from backend.nodes.folding import rosetta_fold
 from backend.nodes.generation import rfdiffusion_enzyme, rfdiffusion_protein_binder
+from backend.nodes.scoring import calculate_ligand_rmsd, calculate_protein_rmsd
 from backend.nodes.selectors import protein_atom_selector, protein_chain_selector
 from backend.nodes.utils import merge
 from backend.schemas.workflow import WorkflowNode
@@ -309,7 +313,7 @@ def test_protein_chain_selector_filters_selected_chains() -> None:
         artifact_store.init_run(run_id)
         await run_registry.create(run_id, total_nodes=1)
         ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
-        node = WorkflowNode(id="chain_selector", type="ProteinChainSelector", options={})
+        node = WorkflowNode(id="chain_selector", type="ChainFilter", options={})
         root = artifact_store.node_dir(run_id, "source", "Test")
         protein = PDB.replace("END\n", "") + PDB_CHAIN_B
         artifact = artifact_store.write_text(run_id=run_id, path=root / "protein.pdb", content=protein, payload_type="Batch Protein")
@@ -329,6 +333,43 @@ def test_protein_chain_selector_filters_selected_chains() -> None:
 
         assert " B   2" in result["batchProtein"].data[0]
         assert " A   1" not in result["batchProtein"].data[0]
+
+    asyncio.run(execute())
+
+
+def test_manual_node_reuses_cache_when_inputs_unchanged() -> None:
+    async def execute() -> None:
+        first_run_id = "run_test_manual_cache_first"
+        second_run_id = "run_test_manual_cache_second"
+        protein = PDB.replace("END\n", "") + PDB_CHAIN_B
+        request = RunCreateRequest.model_validate({"workflow": {"nodes": []}})
+        node = WorkflowNode(id="chain_filter", type="ChainFilter", options={"chains": "B"})
+        artifact_store.init_run(first_run_id)
+        await run_registry.create(first_run_id, total_nodes=1, request=request)
+        ctx = ExecutionContext(run_id=first_run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(first_run_id, "source", "Test")
+        source = artifact_store.write_text(run_id=first_run_id, path=root / "protein.pdb", content=protein, payload_type="Batch Protein")
+        inputs = {"batchProtein": TypedPayload(type_name="Batch Protein", item_count=1, artifact_ids=[source.artifact_id], paths=[source.path], data=[protein])}
+        cache_key = _node_cache_key(node, inputs, {})
+        task = asyncio.create_task(protein_chain_selector(ctx, node, inputs))
+        for _ in range(50):
+            if run_registry.get(first_run_id).pending_inputs:
+                break
+            await asyncio.sleep(0.01)
+        assert await run_registry.submit_node_input(first_run_id, "chain_filter", {"chains": "B"})
+        result = await task
+        await run_registry.record_output(first_run_id, "chain_filter", "batchProtein", result["batchProtein"])
+        await run_registry.record_node_cache_key(first_run_id, "chain_filter", cache_key)
+
+        second_request = RunCreateRequest.model_validate({"workflow": {"nodes": []}, "previous_run_id": first_run_id})
+        artifact_store.init_run(second_run_id)
+        await run_registry.create(second_run_id, total_nodes=1, request=second_request)
+        second_ctx = ExecutionContext(run_id=second_run_id, store=artifact_store, registry=run_registry, uploads={})
+        cached = await _reuse_cached_outputs(second_ctx, node, ["batchProtein"], cache_key)
+
+        assert cached is not None
+        assert cached["batchProtein"].type_name == "Batch Protein"
+        assert not run_registry.get(second_run_id).pending_inputs
 
     asyncio.run(execute())
 
@@ -356,6 +397,245 @@ def test_merge_single_to_batch_rechains_structures() -> None:
         assert result["complexes"].type_name == "Batch Protein (With Ligand)"
         assert " A   1" in result["complexes"].data[0]
         assert " B   1" in result["complexes"].data[0]
+
+    asyncio.run(execute())
+
+
+def test_filter_by_score_waits_for_metric_choice() -> None:
+    async def execute() -> None:
+        run_id = "run_test_filter_by_score_runtime"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        protein_a = artifact_store.write_text(run_id=run_id, path=root / "a.pdb", content=PDB, payload_type="Batch Protein")
+        protein_b = artifact_store.write_text(run_id=run_id, path=root / "b.pdb", content=PDB_CHAIN_B, payload_type="Batch Protein")
+        task = asyncio.create_task(
+            filter_by_score(
+                ctx,
+                WorkflowNode(id="score_filter", type="FilterByScore", options={"mode": "Greater than", "threshold": 2}),
+                {
+                    "structures": TypedPayload(type_name="Batch Protein", item_count=2, paths=[protein_a.path, protein_b.path], data=[PDB, PDB_CHAIN_B]),
+                    "score": TypedPayload(type_name="Score", item_count=2, data={"scores": [{"rmsd": 1.0}, {"rmsd": 3.0}]}),
+                },
+            )
+        )
+        for _ in range(20):
+            if run_registry.get(run_id).pending_inputs:
+                break
+            await asyncio.sleep(0.01)
+        assert await run_registry.submit_node_input(run_id, "score_filter", {"metric": "rmsd"})
+        result = await task
+
+        assert result["structures"].item_count == 1
+        assert result["score"].data == [{"rmsd": 3.0}]
+
+    asyncio.run(execute())
+
+
+def test_rosetta_fold_cofold_builds_parallel_components(monkeypatch) -> None:
+    async def execute() -> None:
+        run_id = "run_test_rf3_cofold"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        ligand_artifact = artifact_store.write_text(run_id=run_id, path=root / "ligand.pdb", content=LIGAND_ABC, payload_type="Batch Ligand")
+        output_path = root / "rf3_output.pdb"
+        output_path.write_text(PDB)
+        captured: dict[str, object] = {}
+
+        async def fake_run_rf3_fold(**kwargs):
+            captured.update(kwargs)
+            return [output_path], [{"pLDDT": 0.9, "length": 6}]
+
+        monkeypatch.setattr(folding_module, "run_rf3_fold", fake_run_rf3_fold)
+        result = await rosetta_fold(
+            ctx,
+            WorkflowNode(id="rf3", type="RosettaFold", options={"inputMode": "Co-folding"}),
+            {
+                "sequences": TypedPayload(
+                    type_name="Batch Sequence",
+                    item_count=2,
+                    data=[{"id": "a", "sequence": "AAA"}, {"id": "b", "sequence": "BBB"}],
+                ),
+                "ligand": TypedPayload(
+                    type_name="Batch Ligand",
+                    item_count=2,
+                    paths=[ligand_artifact.path],
+                    data=[LIGAND_ABC],
+                    metadata={"smiles_list": ["C", "CC"]},
+                ),
+            },
+        )
+
+        assert captured["cofold_jobs"] == [
+            [{"seq": "AAA", "chain_id": "A"}, {"smiles": "C"}],
+            [{"seq": "BBB", "chain_id": "A"}, {"smiles": "CC"}],
+        ]
+        assert result["structures"].type_name == "Batch Protein (With Ligand)"
+
+    asyncio.run(execute())
+
+
+def test_rosetta_fold_cofold_reuses_single_ligand_for_each_job(monkeypatch) -> None:
+    async def execute() -> None:
+        run_id = "run_test_rf3_cofold_single_ligand"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        ligand_artifact = artifact_store.write_text(run_id=run_id, path=root / "ligand.pdb", content=LIGAND_ABC, payload_type="Ligand")
+        output_a = root / "rf3_output_a.pdb"
+        output_b = root / "rf3_output_b.pdb"
+        output_a.write_text(PDB)
+        output_b.write_text(PDB_CHAIN_B)
+        captured: dict[str, object] = {}
+
+        async def fake_run_rf3_fold(**kwargs):
+            captured.update(kwargs)
+            return [output_a, output_b], [{"pLDDT": 0.9, "length": 3}, {"pLDDT": 0.8, "length": 3}]
+
+        monkeypatch.setattr(folding_module, "run_rf3_fold", fake_run_rf3_fold)
+        await rosetta_fold(
+            ctx,
+            WorkflowNode(id="rf3", type="RosettaFold", options={"inputMode": "Co-folding"}),
+            {
+                "sequences": TypedPayload(
+                    type_name="Batch Sequence",
+                    item_count=2,
+                    data=[{"id": "a", "sequence": "AAA"}, {"id": "b", "sequence": "BBB"}],
+                ),
+                "ligand": TypedPayload(
+                    type_name="Ligand",
+                    item_count=1,
+                    paths=[ligand_artifact.path],
+                    data=LIGAND_ABC,
+                    metadata={"smiles": "C"},
+                ),
+            },
+        )
+
+        assert captured["cofold_jobs"] == [
+            [{"seq": "AAA", "chain_id": "A"}, {"smiles": "C"}],
+            [{"seq": "BBB", "chain_id": "A"}, {"smiles": "C"}],
+        ]
+
+    asyncio.run(execute())
+
+
+def test_rosetta_fold_cofold_pairs_multiple_sequence_inputs(monkeypatch) -> None:
+    async def execute() -> None:
+        run_id = "run_test_rf3_cofold_parallel_sequences"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        output_a = root / "rf3_output_a.pdb"
+        output_b = root / "rf3_output_b.pdb"
+        output_a.write_text(PDB)
+        output_b.write_text(PDB_CHAIN_B)
+        source_a = TypedPayload(type_name="Batch Sequence", item_count=2, data=[{"id": "a1", "sequence": "AAA"}, {"id": "a2", "sequence": "AAB"}])
+        source_b = TypedPayload(type_name="Batch Sequence", item_count=2, data=[{"id": "b1", "sequence": "BBB"}, {"id": "b2", "sequence": "BBC"}])
+        captured: dict[str, object] = {}
+
+        async def fake_run_rf3_fold(**kwargs):
+            captured.update(kwargs)
+            return [output_a, output_b], [{"pLDDT": 0.9, "length": 6}, {"pLDDT": 0.8, "length": 6}]
+
+        monkeypatch.setattr(folding_module, "run_rf3_fold", fake_run_rf3_fold)
+        await rosetta_fold(
+            ctx,
+            WorkflowNode(id="rf3", type="RosettaFold", options={"inputMode": "Co-folding"}),
+            {
+                "sequences": TypedPayload(
+                    type_name="Batch Sequence",
+                    item_count=4,
+                    data=[*source_a.data, *source_b.data],
+                    metadata={"combined_payloads": [source_a.model_dump(), source_b.model_dump()]},
+                ),
+            },
+        )
+
+        assert captured["cofold_jobs"] == [
+            [{"seq": "AAA", "chain_id": "A"}, {"seq": "BBB", "chain_id": "B"}],
+            [{"seq": "AAB", "chain_id": "A"}, {"seq": "BBC", "chain_id": "B"}],
+        ]
+
+    asyncio.run(execute())
+
+
+def test_rosetta_fold_cofold_broadcasts_singleton_sequence_input(monkeypatch) -> None:
+    async def execute() -> None:
+        run_id = "run_test_rf3_cofold_singleton_sequence"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        output_a = root / "rf3_output_a.pdb"
+        output_b = root / "rf3_output_b.pdb"
+        output_a.write_text(PDB)
+        output_b.write_text(PDB_CHAIN_B)
+        source_a = TypedPayload(type_name="Batch Sequence", item_count=1, data=[{"id": "a1", "sequence": "AAA"}])
+        source_b = TypedPayload(type_name="Batch Sequence", item_count=2, data=[{"id": "b1", "sequence": "BBB"}, {"id": "b2", "sequence": "BBC"}])
+        captured: dict[str, object] = {}
+
+        async def fake_run_rf3_fold(**kwargs):
+            captured.update(kwargs)
+            return [output_a, output_b], [{"pLDDT": 0.9, "length": 6}, {"pLDDT": 0.8, "length": 6}]
+
+        monkeypatch.setattr(folding_module, "run_rf3_fold", fake_run_rf3_fold)
+        await rosetta_fold(
+            ctx,
+            WorkflowNode(id="rf3", type="RosettaFold", options={"inputMode": "Co-folding"}),
+            {
+                "sequences": TypedPayload(
+                    type_name="Batch Sequence",
+                    item_count=3,
+                    data=[*source_a.data, *source_b.data],
+                    metadata={"combined_payloads": [source_a.model_dump(), source_b.model_dump()]},
+                ),
+            },
+        )
+
+        assert captured["cofold_jobs"] == [
+            [{"seq": "AAA", "chain_id": "A"}, {"seq": "BBB", "chain_id": "B"}],
+            [{"seq": "AAA", "chain_id": "A"}, {"seq": "BBC", "chain_id": "B"}],
+        ]
+
+    asyncio.run(execute())
+
+
+def test_calculate_rmsd_nodes_emit_scores() -> None:
+    async def execute() -> None:
+        run_id = "run_test_rmsd_nodes"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=2)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        ref_protein = artifact_store.write_text(run_id=run_id, path=root / "ref.pdb", content=PDB, payload_type="Protein")
+        batch_protein = artifact_store.write_text(run_id=run_id, path=root / "protein.pdb", content=PDB, payload_type="Batch Protein")
+        ref_ligand = artifact_store.write_text(run_id=run_id, path=root / "ligand_ref.pdb", content=LIGAND_ABC, payload_type="Ligand")
+        batch_ligand = artifact_store.write_text(run_id=run_id, path=root / "ligand.pdb", content=LIGAND_ABC, payload_type="Batch Ligand")
+        protein_result = await calculate_protein_rmsd(
+            ctx,
+            WorkflowNode(id="protein_rmsd", type="CalculateProteinRMSD"),
+            {
+                "reference": TypedPayload(type_name="Protein", item_count=1, paths=[ref_protein.path], data=PDB),
+                "batchProtein": TypedPayload(type_name="Batch Protein", item_count=1, paths=[batch_protein.path], data=[PDB]),
+            },
+        )
+        ligand_result = await calculate_ligand_rmsd(
+            ctx,
+            WorkflowNode(id="ligand_rmsd", type="CalculateLigandRMSD"),
+            {
+                "reference": TypedPayload(type_name="Ligand", item_count=1, paths=[ref_ligand.path], data=LIGAND_ABC),
+                "ligands": TypedPayload(type_name="Batch Ligand", item_count=1, paths=[batch_ligand.path], data=[LIGAND_ABC]),
+            },
+        )
+
+        assert protein_result["score"].data == [{"protein_rmsd": 0.0}]
+        assert ligand_result["score"].data == [{"ligand_rmsd": 0.0}]
 
     asyncio.run(execute())
 

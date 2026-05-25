@@ -28,6 +28,8 @@ async def run_rf3_fold(
     seed: int,
     registry: RunRegistry,
     store: ArtifactStore,
+    cofold_components: list[dict[str, str]] | None = None,
+    cofold_jobs: list[list[dict[str, str]]] | None = None,
 ) -> tuple[list[Path], list[dict[str, Any]]]:
     out_dir = work_dir / "rf3_outputs"
     input_json = work_dir / "rf3_batch_input.json"
@@ -43,12 +45,17 @@ async def run_rf3_fold(
                 details={"checkpoint_path": str(ckpt_path), "env_var": "FOUNDRYUI_RF3_CKPT"},
             )
         )
-    payload = build_rf3_jobs(sequences, ligand_smiles)
+    if cofold_jobs is not None:
+        payload = build_rf3_cofold_jobs(cofold_jobs)
+    elif cofold_components is not None:
+        payload = build_rf3_cofold_job(cofold_components)
+    else:
+        payload = build_rf3_jobs(sequences, ligand_smiles)
     if not payload:
         raise BackendError(
             make_error(
                 "NO_RF3_INPUT_SEQUENCES",
-                "RosettaFold3 requires at least one sequence.",
+                "RosettaFold3 requires at least one sequence or co-folding component.",
                 run_id=run_id,
                 node_id=node_id,
                 node_type=node_type,
@@ -83,6 +90,39 @@ def build_rf3_jobs(sequences: list[dict], ligand_smiles: str | None) -> list[dic
             components.append({"smiles": ligand_smiles})
         jobs.append({"name": _safe_job_name(record_id, index), "components": components})
     return jobs
+
+
+def build_rf3_cofold_job(components: list[dict[str, str]] | None) -> list[dict]:
+    jobs = build_rf3_cofold_jobs([components or []])
+    return jobs[:1]
+
+
+def build_rf3_cofold_jobs(jobs: list[list[dict[str, str]]] | None) -> list[dict]:
+    payload: list[dict] = []
+    for index, components in enumerate(jobs or [], start=1):
+        clean_components = _clean_rf3_components(components)
+        if clean_components:
+            payload.append({"name": f"cofold_{index:04d}", "components": clean_components})
+    return payload
+
+
+def _clean_rf3_components(components: list[dict[str, str]]) -> list[dict[str, str]]:
+    clean_components: list[dict[str, str]] = []
+    for component in components or []:
+        sequence = str(component.get("seq") or "").strip()
+        smiles = str(component.get("smiles") or "").strip()
+        if sequence:
+            clean_components.append({"seq": sequence, "chain_id": str(component.get("chain_id") or _chain_id(len(clean_components))).strip() or "A"})
+        elif smiles:
+            clean_components.append({"smiles": smiles})
+    return clean_components
+
+
+def _chain_id(index: int) -> str:
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    if index < len(letters):
+        return letters[index]
+    return f"A{index - len(letters) + 1}"
 
 
 def _safe_job_name(record_id: str, index: int) -> str:

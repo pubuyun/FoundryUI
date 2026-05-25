@@ -11,6 +11,7 @@ from backend.nodes.selectors import atom_selector, protein_chain_selector, prote
 from backend.nodes.utils import merge, protein_to_seq, split
 from backend.nodes.common import ExecutionContext
 from backend.nodes.viewers import pdb_viewer, sequence_viewer
+from backend.nodes.scoring import calculate_ligand_rmsd, calculate_protein_rmsd
 from backend.schemas.payloads import TypedPayload
 from backend.schemas.workflow import WorkflowNode
 
@@ -30,6 +31,7 @@ HANDLERS = {
     "ProteinAtomSelector": protein_atom_selector,
     "ResidueAtomSelector": protein_atom_selector,
     "ProteinChainSelector": protein_chain_selector,
+    "ChainFilter": protein_chain_selector,
     "RFDiffusionSMbinder": rfdiffusion_smbinder,
     "RFDiffusionProteinBinder": rfdiffusion_protein_binder,
     "RFDiffusionEnzyme": rfdiffusion_enzyme,
@@ -38,6 +40,8 @@ HANDLERS = {
     "RosettaFold": rosetta_fold,
     "RosettaFold3": rosetta_fold,
     "FilterByScore": filter_by_score,
+    "CalculateProteinRMSD": calculate_protein_rmsd,
+    "CalculateLigandRMSD": calculate_ligand_rmsd,
     "FilterChirality": filter_chirality,
     "FilterAtomsChirality": filter_atoms_chirality,
     "BinaryLogic": binary_logic,

@@ -49,6 +49,7 @@ interface PendingRunInput {
   nodeType: string;
   fields: string[];
   payloads: Record<string, any>;
+  choices: Record<string, string[]>;
 }
 
 interface BackendArtifact {
@@ -152,6 +153,7 @@ const viewerModal = reactive<ViewerModal>({
   style: "cartoon",
 });
 let viewer: any;
+let viewerZoomKey = "";
 
 function normalizeApiBase(value: string) {
   return value.trim().replace(/\/+$/, "");
@@ -410,6 +412,17 @@ function selectorValue() {
   return String(selectorInterface()?.value ?? "");
 }
 
+function runtimeChoiceValue(field: string) {
+  const node = pendingRunInput.value ? baklava.editor.graph.findNodeById(pendingRunInput.value.nodeId) : undefined;
+  return String(node?.inputs[field]?.value ?? "");
+}
+
+function setRuntimeChoiceValue(field: string, value: string) {
+  const node = pendingRunInput.value ? baklava.editor.graph.findNodeById(pendingRunInput.value.nodeId) : undefined;
+  const intf = node?.inputs[field];
+  if (intf) intf.value = value;
+}
+
 function setSelectorValue(value: string) {
   const intf = selectorInterface();
   if (intf) {
@@ -560,6 +573,10 @@ function removeChiralityTarget(atom: string) {
   setSelectorValue(formatChiralityTargets(parseChiralityTargets().filter((target) => target.atom !== atom)));
 }
 
+function submitViewerSelection() {
+  closeViewer();
+}
+
 async function submitRuntimeInput() {
   if (!pendingRunInput.value) return;
   const values: Record<string, string> = {};
@@ -670,6 +687,7 @@ function migrateWorkflowDocument(document: any) {
     }
     Object.entries(value).forEach(([key, nested]) => {
       if (key === "type" && nested === "ProteinAtomSelector") value[key] = "ResidueAtomSelector";
+      if (key === "type" && nested === "ProteinChainSelector") value[key] = "ChainFilter";
       if (key === "type" && nested === "Protein Atoms List") value[key] = "Residues Atoms List";
       if (key === "name" && nested === "Protein Atoms List") value[key] = "Residues Atoms List";
       visit(nested);
@@ -1112,6 +1130,7 @@ async function openRuntimeInput(event: RunEventPayload) {
     nodeType: event.node_type,
     fields: event.data?.fields ?? [],
     payloads: event.data?.payloads ?? {},
+    choices: event.data?.choices ?? {},
   };
   if (event.data?.defaults && node) {
     Object.entries(event.data.defaults).forEach(([key, value]) => {
@@ -1128,9 +1147,11 @@ async function openRuntimeInput(event: RunEventPayload) {
       ? "residue"
       : event.node_type === "ProteinAtomSelector" || event.node_type === "ResidueAtomSelector"
         ? "proteinAtom"
-        : event.node_type === "ProteinChainSelector"
+        : event.node_type === "ProteinChainSelector" || event.node_type === "ChainFilter"
           ? "chain"
-          : "atom";
+          : event.node_type === "FilterByScore"
+            ? "score"
+            : "atom";
   viewerModal.fileIndex = 0;
   viewerRuntimeFiles.value = await runtimeFilesFromPayloads(pendingRunInput.value.payloads);
   void nextTick(initializeViewer);
@@ -1138,6 +1159,7 @@ async function openRuntimeInput(event: RunEventPayload) {
 
 function closeViewer() {
   viewerModal.open = false;
+  viewerZoomKey = "";
 }
 
 function connectedSourceNode(node: AbstractNode) {
@@ -1155,10 +1177,18 @@ function connectedSourceOutput(node: AbstractNode) {
   return outputs.value.find((output) => output.node_id === source.id && output.output_key === interfaceKey(source, connection.from));
 }
 
+function nodeStructureOutput(node: AbstractNode) {
+  return outputs.value.find((output) => {
+    if (output.node_id !== node.id || !output.artifact_ids.length) return false;
+    const typeName = String(output.type_name ?? "");
+    return typeName.includes("Protein") || typeName === "Batch Structure";
+  });
+}
+
 async function loadViewerRuntimeFiles(nodeId: string) {
   const node = baklava.editor.graph.findNodeById(nodeId);
-  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector"].includes(String(node.type))) return;
-  const output = connectedSourceOutput(node);
+  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter"].includes(String(node.type))) return;
+  const output = String(node.type) === "ChainFilter" ? nodeStructureOutput(node) ?? connectedSourceOutput(node) : connectedSourceOutput(node);
   if (!output?.artifact_ids.length) return;
   viewerRuntimeFiles.value = await runtimeFilesFromArtifactIds(output.artifact_ids, output.paths);
 }
@@ -1197,8 +1227,7 @@ function structuresForNodeId(nodeId: string, seen = new Set<string>()): Uploaded
     const upstreamFiles = structuresForNodeId(upstream.id, seen);
     if (upstreamFiles.length) return upstreamFiles;
   }
-  if (node?.type === "PDBViewer") return [];
-  return [{ name: "example_complex.pdb", type: "pdb", content: proteinExample }];
+  return [];
 }
 
 const modalFiles = computed(() => structuresForNodeId(viewerModal.nodeId));
@@ -1212,16 +1241,26 @@ async function initializeViewer() {
 }
 
 function renderViewer() {
-  if (!viewer || !activeModalFile.value) return;
+  if (!viewer) return;
+  if (!activeModalFile.value) {
+    viewer.clear();
+    viewer.render();
+    return;
+  }
   const file = activeModalFile.value;
   viewer.clear();
   if (file.type === "fasta") {
     viewer.render();
     return;
   }
-  viewer.addModel(file.content || proteinExample, "pdb");
+  if (!file.content) {
+    viewer.render();
+    return;
+  }
+  viewer.addModel(file.content, "pdb");
   if (viewerModal.style === "stick" || viewerModal.mode === "atom" || viewerModal.mode === "proteinAtom" || viewerModal.mode === "chain") {
-    viewer.setStyle({}, { stick: { radius: 0.18 } });
+    viewer.setStyle({ hetflag: false }, { stick: { radius: 0.18 } });
+    viewer.setStyle({ hetflag: true }, { stick: { colorscheme: "greenCarbon", radius: 0.22 } });
   } else if (viewerModal.style === "surface") {
     viewer.setStyle({ hetflag: false }, { cartoon: { color: "lightgray" } });
     viewer.addSurface((globalThis as any).$3Dmol?.SurfaceType?.VDW ?? 1, { opacity: 0.6, color: "white" }, { hetflag: false });
@@ -1266,7 +1305,11 @@ function renderViewer() {
       if (chain) toggleSelectorItem(chain);
     });
   }
-  viewer.zoomTo();
+  const zoomKey = `${viewerModal.nodeId}:${viewerModal.fileIndex}:${file.name}`;
+  if (zoomKey !== viewerZoomKey) {
+    viewer.zoomTo();
+    viewerZoomKey = zoomKey;
+  }
   viewer.render();
 }
 
@@ -1434,13 +1477,13 @@ onBeforeUnmount(() => {
           <button type="button" class="icon-button" title="Close viewer" @click="closeViewer">X</button>
         </header>
         <div class="viewer-controls">
-          <label>
+          <label v-if="viewerModal.mode !== 'score'">
             File
             <select v-model.number="viewerModal.fileIndex">
               <option v-for="(file, index) in modalFiles" :key="file.name + index" :value="index">{{ file.name }}</option>
             </select>
           </label>
-          <label>
+          <label v-if="viewerModal.mode !== 'score'">
             Style
             <select v-model="viewerModal.style">
               <option value="cartoon">Cartoon</option>
@@ -1464,6 +1507,12 @@ onBeforeUnmount(() => {
               @input="setSelectorValue(($event.target as HTMLTextAreaElement).value)"
             />
           </label>
+          <label v-if="pendingRunInput?.fields.includes('metric')" class="selector-value">
+            Score
+            <select :value="runtimeChoiceValue('metric')" @change="setRuntimeChoiceValue('metric', ($event.target as HTMLSelectElement).value)">
+              <option v-for="choice in pendingRunInput.choices.metric ?? []" :key="choice" :value="choice">{{ choice }}</option>
+            </select>
+          </label>
           <div v-if="pendingRunInput?.fields.includes('chiralityTargets')" class="chirality-targets">
             <div v-for="target in parseChiralityTargets()" :key="target.atom" class="chirality-target">
               <span>{{ target.atom }}</span>
@@ -1475,8 +1524,9 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <button v-if="pendingRunInput" type="button" class="run-button" @click="submitRuntimeInput">Submit</button>
+          <button v-else-if="viewerModal.mode === 'residue'" type="button" class="run-button" @click="submitViewerSelection">Submit</button>
         </div>
-        <div ref="viewerEl" class="viewer-surface" />
+        <div v-show="viewerModal.mode !== 'score'" ref="viewerEl" class="viewer-surface" />
         <p v-if="activeModalFile?.type === 'fasta'" class="sequence-preview">{{ activeModalFile.content || "No sequence content loaded." }}</p>
       </section>
     </div>

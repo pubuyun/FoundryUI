@@ -6,7 +6,7 @@ from Bio.PDB import MMCIFIO, PDBParser
 from backend.bio.ligand import pdb_to_smiles, smiles_to_pdb
 from backend.foundry_tools.common import collect_files
 from backend.foundry_tools.mpnn import build_mpnn_command
-from backend.foundry_tools.rf3 import build_rf3_jobs, collect_rf3_results
+from backend.foundry_tools.rf3 import build_rf3_cofold_job, build_rf3_jobs, collect_rf3_results
 from backend.foundry_tools.rfd3 import _standardize_rfd3_structures
 from backend.nodes.common import payload_from_artifacts
 from backend.nodes.filters import _score_value
@@ -87,6 +87,29 @@ def test_rf3_jobs_use_component_json_with_ligand_smiles():
             "components": [
                 {"seq": "ACDE", "chain_id": "A"},
                 {"smiles": "CCO"},
+            ],
+        }
+    ]
+
+
+def test_rf3_cofold_job_uses_one_multi_component_complex():
+    jobs = build_rf3_cofold_job(
+        [
+            {"seq": "ACDE", "chain_id": "A"},
+            {"seq": "FGHI", "chain_id": "B"},
+            {"smiles": "CCO"},
+            {"smiles": "CCN"},
+        ]
+    )
+
+    assert jobs == [
+        {
+            "name": "cofold_0001",
+            "components": [
+                {"seq": "ACDE", "chain_id": "A"},
+                {"seq": "FGHI", "chain_id": "B"},
+                {"smiles": "CCO"},
+                {"smiles": "CCN"},
             ],
         }
     ]

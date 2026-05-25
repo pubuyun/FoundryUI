@@ -159,7 +159,7 @@ class RunRegistry:
         record = self.records[run_id]
         record.node_cache_keys[node_id] = cache_key
 
-    async def request_node_input(self, run_id: str, node_id: str, node_type: str, fields: list[str], payloads: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    async def request_node_input(self, run_id: str, node_id: str, node_type: str, fields: list[str], payloads: dict[str, Any], defaults: dict[str, Any], choices: dict[str, list[str]] | None = None) -> dict[str, Any]:
         record = self.records[run_id]
         future: Future[dict[str, Any]] = Future()
         record.pending_inputs[node_id] = future
@@ -170,7 +170,7 @@ class RunRegistry:
                 node_id=node_id,
                 node_type=node_type,
                 message=f"{node_type} requires user input.",
-                data={"fields": fields, "payloads": payloads, "defaults": defaults},
+                data={"fields": fields, "payloads": payloads, "defaults": defaults, "choices": choices or {}},
             )
         )
         try:

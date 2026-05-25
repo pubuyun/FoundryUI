@@ -74,6 +74,12 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         options=_options([OptionSpec("chains", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
         outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
     ),
+    "ChainFilter": NodeSpec(
+        "ChainFilter",
+        inputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
+        options=_options([OptionSpec("chains", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
+        outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
+    ),
     "LigandInput": NodeSpec(
         "LigandInput",
         options=_options(
@@ -139,9 +145,9 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 PortSpec("complex", "Batch Protein with Ligand"),
                 PortSpec("ligand", "List of Residues"),
                 PortSpec("unindex", "List of Residues"),
-                PortSpec("selectFixedAtoms", "Residues Atoms List"),
-                PortSpec("selectBuried", "Residues Atoms List"),
-                PortSpec("selectExposed", "Residues Atoms List"),
+                PortSpec("selectFixedAtoms", "Residues Atoms List", optional=True),
+                PortSpec("selectBuried", "Residues Atoms List", optional=True),
+                PortSpec("selectExposed", "Residues Atoms List", optional=True),
             ]
         ),
         options=_options(
@@ -204,6 +210,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
                 OptionSpec("numSteps", "int", 50, min_value=1),
                 OptionSpec("seed", "int", 42, min_value=0),
+                OptionSpec("inputMode", "select", "Concat inputs", choices=("Concat inputs", "Co-folding")),
             ]
         ),
         outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
@@ -217,6 +224,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
                 OptionSpec("numSteps", "int", 50, min_value=1),
                 OptionSpec("seed", "int", 42, min_value=0),
+                OptionSpec("inputMode", "select", "Concat inputs", choices=("Concat inputs", "Co-folding")),
             ]
         ),
         outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
@@ -226,12 +234,22 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
         options=_options(
             [
-                OptionSpec("metric", "select", "pLDDT", choices=("pLDDT", "length", "pTM", "interface_PAE", "ipTM", "ranking_score")),
-                OptionSpec("mode", "select", "Is largest top", choices=("Is largest top", "Is smallest top", "Higher than", "Lower than")),
+                OptionSpec("metric", "select", ""),
+                OptionSpec("mode", "select", "Is largest top", choices=("Is largest top", "Is smallest top", "Greater than", "Smaller than", "Higher than", "Lower than")),
                 OptionSpec("threshold", "float", 10),
             ]
         ),
         outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
+    ),
+    "CalculateProteinRMSD": NodeSpec(
+        "CalculateProteinRMSD",
+        inputs=_ports([PortSpec("reference", "Protein"), PortSpec("batchProtein", "Batch Protein")]),
+        outputs=_ports([PortSpec("score", "Score")]),
+    ),
+    "CalculateLigandRMSD": NodeSpec(
+        "CalculateLigandRMSD",
+        inputs=_ports([PortSpec("reference", "Ligand"), PortSpec("ligands", "Batch Protein (With Ligand)")]),
+        outputs=_ports([PortSpec("score", "Score")]),
     ),
     "FilterChirality": NodeSpec(
         "FilterChirality",
@@ -327,4 +345,6 @@ def spec_for(node_type: str) -> NodeSpec | None:
         return NODE_CATALOG["RosettaFold3"]
     if node_type == "ProteinAtomSelector":
         return NODE_CATALOG["ResidueAtomSelector"]
+    if node_type == "ProteinChainSelector":
+        return NODE_CATALOG["ChainFilter"]
     return NODE_CATALOG.get(node_type)

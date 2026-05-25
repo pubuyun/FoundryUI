@@ -81,9 +81,9 @@ async def rfdiffusion_enzyme(ctx: ExecutionContext, node: WorkflowNode, inputs: 
             "ligand": ",".join(ligand_residues),
             "unindex": ",".join(unindex),
             "length": str(option(node, "length", "180-200")),
-            "select_fixed_atoms": _atom_map(inputs["selectFixedAtoms"]),
-            "select_buried": _atom_map(inputs["selectBuried"]),
-            "select_exposed": _atom_map(inputs["selectExposed"]),
+            "select_fixed_atoms": _atom_map(inputs.get("selectFixedAtoms")),
+            "select_buried": _atom_map(inputs.get("selectBuried")),
+            "select_exposed": _atom_map(inputs.get("selectExposed")),
         }
     }
     paths = await run_rfd3_payload(
@@ -106,7 +106,9 @@ async def rfdiffusion_enzyme(ctx: ExecutionContext, node: WorkflowNode, inputs: 
     return {"complexes": TypedPayload(type_name="Batch Protein with Ligand", item_count=len(artifacts), artifact_ids=[a.artifact_id for a in artifacts], paths=[a.path for a in artifacts], data=data)}
 
 
-def _atom_map(payload: TypedPayload) -> dict[str, str]:
+def _atom_map(payload: TypedPayload | None) -> dict[str, str]:
+    if payload is None:
+        return {}
     data = payload.data or {}
     if isinstance(data, dict):
         return {str(key): str(value) for key, value in data.items()}

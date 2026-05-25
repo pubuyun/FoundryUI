@@ -29,7 +29,7 @@ export interface OptionSpec {
   accept?: string;
   min?: number;
   max?: number;
-  viewerMode?: "residue" | "atom" | "proteinAtom" | "chain" | "structure" | "batchStructure" | "sequence";
+  viewerMode?: "residue" | "atom" | "proteinAtom" | "chain" | "score" | "structure" | "batchStructure" | "sequence";
 }
 
 export interface FoundryNodeSpec {
@@ -142,9 +142,9 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     outputs: [{ key: "proteinAtoms", label: "Residues Atoms List", type: "Residues Atoms List" }],
   },
   {
-    type: "ProteinChainSelector",
-    title: "Protein Chain Selector",
-    category: "Selector",
+    type: "ChainFilter",
+    title: "Chain Filter",
+    category: "Filter",
     description: "Pause at runtime and keep selected protein chains.",
     requiresRuntimeInput: true,
     inputs: [{ key: "batchProtein", label: "Batch Protein", type: "Batch Protein" }],
@@ -157,7 +157,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
   {
     type: "LigandInput",
     title: "Ligand Input",
-    category: "Structure Inputs",
+    category: "Load",
     description: "Manual ligand input from PDB upload.",
     options: [
       { key: "file", label: "Upload File", kind: "file", value: "", accept: ".pdb" },
@@ -168,7 +168,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
   {
     type: "ProteinInput",
     title: "Protein Input",
-    category: "Structure Inputs",
+    category: "Load",
     description: "Manual batch protein input from PDB files.",
     options: [
       { key: "file", label: "Upload File", kind: "file", value: "", accept: ".pdb" },
@@ -179,7 +179,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
   {
     type: "ProteinWithLigandInput",
     title: "Protein With Ligand Input",
-    category: "Structure Inputs",
+    category: "Load",
     description: "Manual protein-ligand complex input from PDB files.",
     options: [
       { key: "file", label: "Upload File", kind: "file", value: "", accept: ".pdb" },
@@ -190,7 +190,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
   {
     type: "SequenceInput",
     title: "Sequence Input",
-    category: "Structure Inputs",
+    category: "Load",
     description: "Manual batch sequence input from FASTA files.",
     options: [{ key: "file", label: "Upload File", kind: "file", value: "", accept: ".fasta,.fa" }],
     outputs: [{ key: "batchSequence", label: "Batch Sequence", type: "Batch Sequence" }],
@@ -240,9 +240,9 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "complex", label: "Protein with Ligand", type: "Batch Protein with Ligand" },
       { key: "ligand", label: "ligand residues", type: "List of Residues" },
       { key: "unindex", label: "unindex residues", type: "List of Residues" },
-      { key: "selectFixedAtoms", label: "select_fixed_atoms", type: "Residues Atoms List" },
-      { key: "selectBuried", label: "select_buried", type: "Residues Atoms List" },
-      { key: "selectExposed", label: "select_exposed", type: "Residues Atoms List" },
+      { key: "selectFixedAtoms", label: "select_fixed_atoms", type: "Residues Atoms List", optional: true },
+      { key: "selectBuried", label: "select_buried", type: "Residues Atoms List", optional: true },
+      { key: "selectExposed", label: "select_exposed", type: "Residues Atoms List", optional: true },
     ],
     options: [
       { key: "length", label: "length", kind: "text", value: "180-200" },
@@ -305,6 +305,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "diffusionBatchSize", label: "diffusion_batch_size", kind: "int", value: 5, min: 1 },
       { key: "numSteps", label: "num_steps", kind: "int", value: 50, min: 1 },
       { key: "seed", label: "seed", kind: "int", value: 42, min: 0 },
+      { key: "inputMode", label: "Input mode", kind: "select", value: "Concat inputs", items: ["Concat inputs", "Co-folding"] },
     ],
     outputs: [
       { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
@@ -316,19 +317,42 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     title: "Filter By Score",
     category: "Filter",
     description: "Filter model batches by one score metric, preserving score ordering.",
+    requiresRuntimeInput: true,
     inputs: [
       { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
     options: [
-      { key: "metric", label: "Specific Score", kind: "select", value: "pLDDT", items: ["pLDDT", "length", "pTM", "interface_PAE", "ipTM", "ranking_score"] },
-      { key: "mode", label: "Filter Mode", kind: "select", value: "Is largest top", items: ["Is largest top", "Is smallest top", "Higher than", "Lower than"] },
+      { key: "metric", label: "Specific Score", kind: "select", value: "", items: [] },
+      { key: "mode", label: "Filter Mode", kind: "select", value: "Is largest top", items: ["Is largest top", "Is smallest top", "Greater than", "Smaller than"] },
       { key: "threshold", label: "top / threshold", kind: "float", value: 10 },
     ],
     outputs: [
       { key: "structures", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },
     ],
+  },
+  {
+    type: "CalculateProteinRMSD",
+    title: "Calculate Protein RMSD",
+    category: "Analysis",
+    description: "Calculate CA RMSD from a reference protein to a protein batch.",
+    inputs: [
+      { key: "reference", label: "Protein (Ref)", type: "Protein" },
+      { key: "batchProtein", label: "Batch Protein", type: "Batch Protein" },
+    ],
+    outputs: [{ key: "score", label: "Score", type: "Score" }],
+  },
+  {
+    type: "CalculateLigandRMSD",
+    title: "Calculate Ligand RMSD",
+    category: "Analysis",
+    description: "Calculate ligand RMSD from a reference ligand to ligands or complexes.",
+    inputs: [
+      { key: "reference", label: "Ligand (Ref)", type: "Ligand" },
+      { key: "ligands", label: "Batch Protein With Ligand or Batch Ligand", type: "Batch Protein (With Ligand)" },
+    ],
+    outputs: [{ key: "score", label: "Score", type: "Score" }],
   },
   {
     type: "FilterChirality",
@@ -390,7 +414,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     type: "Merge",
     title: "Merge",
     category: "Util",
-    description: "Merge two structure inputs into chain-separated structures.",
+    description: "Merge two Load into chain-separated structures.",
     inputs: [
       { key: "inputA", label: "Input A", type: "Batch Protein (With Ligand)" },
       { key: "inputB", label: "Input B", type: "Batch Protein (With Ligand)" },
