@@ -45,3 +45,4 @@ class RunStatus(BaseModel):
     recent_output: list[str] = []
     warnings: list[Any] = []
     errors: list[Any] = []
+    pending_inputs: list[dict[str, Any]] = []

@@ -89,6 +89,57 @@ def test_run_registry_counts_node_completion_once() -> None:
     asyncio.run(execute())
 
 
+def test_run_registry_reports_only_unresolved_pending_input() -> None:
+    async def execute() -> None:
+        run_id = "run_test_pending_input_status"
+        await run_registry.create(run_id, total_nodes=1)
+        task = asyncio.create_task(
+            run_registry.request_node_input(
+                run_id,
+                "manual_node",
+                "ResidueSelector",
+                ["residues"],
+                {},
+                {"residues": "A1"},
+            )
+        )
+        for _ in range(20):
+            status = run_registry.status(run_id)
+            if status and status.pending_inputs:
+                break
+            await asyncio.sleep(0.01)
+
+        status = run_registry.status(run_id)
+        assert status is not None
+        assert len(status.pending_inputs) == 1
+        assert status.pending_inputs[0]["event"] == "input_required"
+        assert status.pending_inputs[0]["node_id"] == "manual_node"
+
+        replay_queue = await run_registry.subscribe(run_id)
+        assert replay_queue is not None
+        replayed_events = []
+        while not replay_queue.empty():
+            replayed_events.append((await replay_queue.get()).event)
+        run_registry.unsubscribe(run_id, replay_queue)
+        assert "input_required" in replayed_events
+
+        assert await run_registry.submit_node_input(run_id, "manual_node", {"residues": "A2"})
+        assert await task == {"residues": "A2"}
+        status = run_registry.status(run_id)
+        assert status is not None
+        assert status.pending_inputs == []
+
+        replay_queue = await run_registry.subscribe(run_id)
+        assert replay_queue is not None
+        replayed_events = []
+        while not replay_queue.empty():
+            replayed_events.append((await replay_queue.get()).event)
+        run_registry.unsubscribe(run_id, replay_queue)
+        assert "input_required" not in replayed_events
+
+    asyncio.run(execute())
+
+
 def test_unchanged_node_reuses_previous_run_output() -> None:
     async def execute() -> None:
         first_run_id = "run_test_cache_previous"

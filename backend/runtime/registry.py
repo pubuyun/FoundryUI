@@ -31,6 +31,7 @@ class RunRecord:
     outputs: dict[tuple[str, str], Any] = field(default_factory=dict)
     node_cache_keys: dict[str, str] = field(default_factory=dict)
     pending_inputs: dict[str, Future[dict[str, Any]]] = field(default_factory=dict)
+    pending_input_requests: dict[str, RunEvent] = field(default_factory=dict)
     submitted_input_node_ids: set[str] = field(default_factory=set)
 
     @property
@@ -70,6 +71,11 @@ class RunRegistry:
             recent_output=list(record.recent_output),
             warnings=[warning.model_dump() for warning in record.warnings],
             errors=[error.model_dump() for error in record.errors],
+            pending_inputs=[
+                event.model_dump(mode="json")
+                for node_id, event in record.pending_input_requests.items()
+                if node_id in record.pending_inputs and node_id not in record.submitted_input_node_ids
+            ],
         )
 
     async def publish(self, event: RunEvent) -> None:
@@ -132,6 +138,7 @@ class RunRegistry:
             if not future.done():
                 future.cancel()
         record.pending_inputs.clear()
+        record.pending_input_requests.clear()
         if record.state == "queued":
             record.state = "stopped"
             await self.publish(RunEvent(event="stopped", run_id=run_id, message="Run stopped."))
@@ -147,6 +154,7 @@ class RunRegistry:
             if not future.done():
                 future.cancel()
         record.pending_inputs.clear()
+        record.pending_input_requests.clear()
         record.state = "stopped"
         record.current_node_id = None
         record.current_node_type = None
@@ -165,20 +173,21 @@ class RunRegistry:
         future: Future[dict[str, Any]] = Future()
         record.pending_inputs[node_id] = future
         record.submitted_input_node_ids.discard(node_id)
-        await self.publish(
-            RunEvent(
-                event="input_required",
-                run_id=run_id,
-                node_id=node_id,
-                node_type=node_type,
-                message=f"{node_type} requires user input.",
-                data={"fields": fields, "payloads": payloads, "defaults": defaults, "choices": choices or {}},
-            )
+        event = RunEvent(
+            event="input_required",
+            run_id=run_id,
+            node_id=node_id,
+            node_type=node_type,
+            message=f"{node_type} requires user input.",
+            data={"fields": fields, "payloads": payloads, "defaults": defaults, "choices": choices or {}},
         )
+        await self.publish(event)
+        record.pending_input_requests[node_id] = event
         try:
             return await asyncio.wrap_future(future)
         finally:
             record.pending_inputs.pop(node_id, None)
+            record.pending_input_requests.pop(node_id, None)
 
     async def submit_node_input(self, run_id: str, node_id: str, values: dict[str, Any]) -> bool:
         record = self.records.get(run_id)
@@ -188,6 +197,7 @@ class RunRegistry:
         if future is None or future.done():
             return False
         record.submitted_input_node_ids.add(node_id)
+        record.pending_input_requests.pop(node_id, None)
         future.set_result(values)
         await self.publish(RunEvent(event="node_progress", run_id=run_id, node_id=node_id, message="User input received."))
         return True

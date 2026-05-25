@@ -50,6 +50,7 @@ interface PendingRunInput {
   fields: string[];
   payloads: Record<string, any>;
   choices: Record<string, string[]>;
+  sequence: number;
 }
 
 interface BackendArtifact {
@@ -83,11 +84,13 @@ interface RunStatus {
   recent_output: string[];
   warnings: Array<Record<string, any>>;
   errors: Array<Record<string, any>>;
+  pending_inputs?: RunEventPayload[];
 }
 
 interface RunEventPayload {
   event: string;
   run_id: string;
+  sequence?: number;
   node_id?: string | null;
   node_type?: string | null;
   message?: string | null;
@@ -137,6 +140,7 @@ const cachedNodeIds = ref(new Set<string>());
 const pendingInputNodeIds = ref(new Set<string>());
 const eventSource = ref<EventSource | null>(null);
 const nodeElements = new Map<string, HTMLElement>();
+const manualSelections = reactive<Record<string, Record<string, string>>>({});
 const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : runState.value.toUpperCase()));
 const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
 const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
@@ -421,12 +425,27 @@ function setRuntimeChoiceValue(field: string, value: string) {
   const node = pendingRunInput.value ? baklava.editor.graph.findNodeById(pendingRunInput.value.nodeId) : undefined;
   const intf = node?.inputs[field];
   if (intf) intf.value = value;
+  if (pendingRunInput.value) {
+    manualSelections[pendingRunInput.value.nodeId] = { ...manualSelections[pendingRunInput.value.nodeId], [field]: value };
+    void saveSessionDocument();
+  }
+}
+
+function setNodeInputValue(nodeId: string, field: string, value: string) {
+  const node = baklava.editor.graph.findNodeById(nodeId);
+  const intf = node?.inputs[field];
+  if (intf) intf.value = value;
 }
 
 function setSelectorValue(value: string) {
   const intf = selectorInterface();
   if (intf) {
     intf.value = value;
+    const node = nodeByModal();
+    if (node && nodeRequiresRuntimeInput(node)) {
+      manualSelections[node.id] = { ...manualSelections[node.id], [interfaceKey(node, intf)]: value };
+      void saveSessionDocument();
+    }
     void nextTick(renderViewer);
   }
 }
@@ -584,6 +603,7 @@ async function submitRuntimeInput() {
     const node = baklava.editor.graph.findNodeById(pendingRunInput.value!.nodeId);
     values[field] = String(node?.inputs[field]?.value ?? "");
   });
+  manualSelections[pendingRunInput.value.nodeId] = { ...manualSelections[pendingRunInput.value.nodeId], ...values };
   await postJson(`/api/runs/${pendingRunInput.value.runId}/input`, {
     node_id: pendingRunInput.value.nodeId,
     values,
@@ -661,6 +681,7 @@ function workflowDocument() {
     baklava: baklava.editor.save(),
     workflow: normalizedWorkflow(),
     uploads: Object.fromEntries(Object.entries(uploadedByNode).map(([nodeId, files]) => [nodeId, files])),
+    manualSelections: Object.fromEntries(Object.entries(manualSelections).map(([nodeId, values]) => [nodeId, { ...values }])),
   };
 }
 
@@ -674,9 +695,25 @@ function loadWorkflowDocument(document: any) {
   Object.entries(document.uploads ?? {}).forEach(([nodeId, files]) => {
     uploadedByNode[nodeId] = files as UploadedStructure[];
   });
+  Object.keys(manualSelections).forEach((nodeId) => {
+    delete manualSelections[nodeId];
+  });
+  Object.entries(document.manualSelections ?? {}).forEach(([nodeId, values]) => {
+    if (!values || typeof values !== "object" || Array.isArray(values)) return;
+    manualSelections[nodeId] = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, String(value ?? "")]));
+  });
+  restoreManualSelections();
   if (warnings.length) {
     console.warn("Workflow loaded with warnings", warnings);
   }
+}
+
+function restoreManualSelections() {
+  Object.entries(manualSelections).forEach(([nodeId, values]) => {
+    Object.entries(values).forEach(([field, value]) => {
+      setNodeInputValue(nodeId, field, value);
+    });
+  });
 }
 
 function migrateWorkflowDocument(document: any) {
@@ -756,6 +793,9 @@ async function loadWorkflow(event: Event) {
 
 function clearWorkflow(save: boolean | Event = true) {
   [...baklava.editor.graph.nodes].forEach((node) => baklava.editor.graph.removeNode(node));
+  Object.keys(manualSelections).forEach((nodeId) => {
+    delete manualSelections[nodeId];
+  });
   if (save !== false) void saveSessionDocument();
 }
 
@@ -921,6 +961,14 @@ async function refreshRunStatus(runId = currentRunId.value) {
   if (status.recent_output?.length) {
     runLogs.value = status.recent_output.slice(-160);
   }
+  openPendingInputFromStatus(status);
+}
+
+function openPendingInputFromStatus(status: RunStatus) {
+  const pending = status.pending_inputs?.find((event) => event.node_id);
+  if (!pending || status.state === "completed" || status.state === "failed" || status.state === "stopped") return;
+  if (pendingRunInput.value?.nodeId === pending.node_id) return;
+  void openRuntimeInput(pending);
 }
 
 async function loadArtifacts(runId = currentRunId.value) {
@@ -986,6 +1034,7 @@ function connectRunEvents(runId: string) {
   source.onerror = () => {
     if (runState.value !== "completed" && runState.value !== "failed" && runState.value !== "stopped") {
       runMessage.value = "Event stream disconnected";
+      void refreshRunStatus(runId);
     }
     closeRunEvents();
   };
@@ -1005,7 +1054,7 @@ function handleRunEvent(event: RunEventPayload) {
   } else if (event.event === "node_completed") {
     runMessage.value = `${event.node_type ?? "Node"} completed`;
     if (event.node_id) setNodePendingInput(event.node_id, false);
-    if (event.node_id && pendingRunInput.value?.nodeId === event.node_id) {
+    if (shouldClosePendingInput(event)) {
       pendingRunInput.value = null;
       closeViewer();
     }
@@ -1020,7 +1069,7 @@ function handleRunEvent(event: RunEventPayload) {
     void openRuntimeInput(event);
   } else if (event.event === "node_progress" && event.node_id && event.message === "User input received.") {
     setNodePendingInput(event.node_id, false);
-    if (pendingRunInput.value?.nodeId === event.node_id) {
+    if (shouldClosePendingInput(event)) {
       pendingRunInput.value = null;
       closeViewer();
     }
@@ -1049,6 +1098,11 @@ function handleRunEvent(event: RunEventPayload) {
     void refreshRunFiles(event.run_id);
     closeRunEvents();
   }
+}
+
+function shouldClosePendingInput(event: RunEventPayload) {
+  if (!event.node_id || pendingRunInput.value?.nodeId !== event.node_id) return false;
+  return Number(event.sequence ?? 0) > pendingRunInput.value.sequence;
 }
 
 function closeRunEvents() {
@@ -1142,6 +1196,7 @@ async function openRuntimeInput(event: RunEventPayload) {
     fields: event.data?.fields ?? [],
     payloads: event.data?.payloads ?? {},
     choices: event.data?.choices ?? {},
+    sequence: Number(event.sequence ?? 0),
   };
   if (event.data?.defaults && node) {
     Object.entries(event.data.defaults).forEach(([key, value]) => {
