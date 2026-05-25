@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.bio.fasta import parse_fasta, write_fasta
-from backend.bio.ligand import pdb_to_smiles
+from backend.bio.ligand import standardize_ligand_pdb
 from backend.bio.pdb import first_residue_name, rename_residue, validate_pdb
 from backend.nodes.common import ExecutionContext, embedded_or_stored_uploads, node_dir, option, payload_from_artifacts
 from backend.schemas.errors import BackendError, make_error
@@ -24,19 +24,23 @@ async def ligand_input(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[s
             raise BackendError(make_error("INVALID_LIGAND_FILE_TYPE", "LigandInput accepts PDB files.", run_id=ctx.run_id, node_id=node.id, node_type=node.type, option_key="file", details={"file": name}))
         validate_pdb(content)
         pdbs.append(content)
-        smiles_values.append(pdb_to_smiles(content))
     if len(pdbs) == 1:
         residue_name = ctx.next_ligand_residue_name()
-        pdb = rename_residue(pdbs[0], residue_name)
+        pdb, smiles = standardize_ligand_pdb(rename_residue(pdbs[0], residue_name), residue_name)
         artifact = await ctx.write_text_artifact(node, out_dir / "ligand.pdb", pdb, "Ligand", "chemical/x-pdb")
-        return {"ligand": payload_from_artifacts("Ligand", [artifact], data=pdb, metadata={"residue_name": residue_name, "residue_names": [residue_name], "smiles": smiles_values[0], "smiles_list": smiles_values[:1], "renamed_residue": True})}
+        return {"ligand": payload_from_artifacts("Ligand", [artifact], data=pdb, metadata={"residue_name": residue_name, "residue_names": [residue_name], "smiles": smiles, "smiles_list": [smiles], "renamed_residue": True, "standardized": True})}
 
     artifacts = []
     residue_names = [first_residue_name(pdb) for pdb in pdbs]
+    standardized_pdbs = []
+    smiles_values = []
     for index, pdb in enumerate(pdbs, start=1):
-        artifact = await ctx.write_text_artifact(node, out_dir / f"ligand_{index:04d}.pdb", pdb, "Batch Ligand", "chemical/x-pdb")
+        standardized, smiles = standardize_ligand_pdb(pdb)
+        standardized_pdbs.append(standardized)
+        smiles_values.append(smiles)
+        artifact = await ctx.write_text_artifact(node, out_dir / f"ligand_{index:04d}.pdb", standardized, "Batch Ligand", "chemical/x-pdb")
         artifacts.append(artifact)
-    return {"ligand": payload_from_artifacts("Batch Ligand", artifacts, data=pdbs, metadata={"residue_names": residue_names, "smiles_list": smiles_values, "renamed_residue": False})}
+    return {"ligand": payload_from_artifacts("Batch Ligand", artifacts, data=standardized_pdbs, metadata={"residue_names": residue_names, "smiles_list": smiles_values, "renamed_residue": False, "standardized": True})}
 
 
 async def protein_input(ctx: ExecutionContext, node: WorkflowNode, inputs: dict[str, TypedPayload]) -> dict[str, TypedPayload]:

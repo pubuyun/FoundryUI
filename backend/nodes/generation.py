@@ -31,6 +31,6 @@ async def rfdiffusion_smbinder(ctx: ExecutionContext, node: WorkflowNode, inputs
     )
     if not paths:
         raise BackendError(make_error("NO_RFD3_OUTPUTS", "RFDiffusionSMbinder did not produce PDB outputs.", run_id=ctx.run_id, node_id=node.id, node_type=node.type))
-    artifacts = await copy_paths_as_artifacts(ctx, node, paths, "Batch Protein (With Ligand)")
-    data = read_payload_files(ctx, TypedPayload(type_name="Batch Protein (With Ligand)", paths=[artifact.path for artifact in artifacts]))
-    return {"complexes": TypedPayload(type_name="Batch Protein (With Ligand)", item_count=len(artifacts), artifact_ids=[a.artifact_id for a in artifacts], paths=[a.path for a in artifacts], data=data)}
+    artifacts = await copy_paths_as_artifacts(ctx, node, paths, "Batch Protein with Ligand")
+    data = read_payload_files(ctx, TypedPayload(type_name="Batch Protein with Ligand", paths=[artifact.path for artifact in artifacts]))
+    return {"complexes": TypedPayload(type_name="Batch Protein with Ligand", item_count=len(artifacts), artifact_ids=[a.artifact_id for a in artifacts], paths=[a.path for a in artifacts], data=data)}

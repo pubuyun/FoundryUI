@@ -6,7 +6,7 @@ from backend.schemas.payloads import TypedPayload
 from backend.runtime.runner import run_workflow
 from backend.schemas.workflow import RunCreateRequest
 from backend.bio.sequences import pdb_to_sequence
-from backend.bio.ligand import ligand_has_chirality_targets, smiles_to_pdb
+from backend.bio.ligand import ligand_matches_smiles_chirality, smiles_to_pdb
 from backend.nodes.common import ExecutionContext
 from backend.nodes.filters import filter_chirality
 from backend.schemas.workflow import WorkflowNode
@@ -178,12 +178,12 @@ def test_pdb_to_sequence_uses_standard_residue_codes() -> None:
     assert pdb_to_sequence(PDB) == "G"
 
 
-def test_filter_chirality_keeps_only_matching_ligand_targets() -> None:
+def test_filter_chirality_keeps_only_matching_smiles_chirality() -> None:
     async def execute() -> None:
         run_id = "run_test_filter_by_ligand_match"
         artifact_store.init_run(run_id)
         await run_registry.create(run_id, total_nodes=1)
-        node = WorkflowNode(id="filter", type="FilterChirality", options={"targets": "C1:S"})
+        node = WorkflowNode(id="filter", type="FilterChirality", options={"smiles": "F[C@](Cl)(Br)I"})
         ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
         root = artifact_store.node_dir(run_id, "source", "Test")
         matching_ligand = smiles_to_pdb("F[C@](Cl)(Br)I")
@@ -210,10 +210,9 @@ def test_filter_chirality_keeps_only_matching_ligand_targets() -> None:
     asyncio.run(execute())
 
 
-def test_ligand_has_chirality_targets_uses_atom_names() -> None:
+def test_ligand_matches_smiles_chirality() -> None:
     ligand = smiles_to_pdb("F[C@](Cl)(Br)I")
-    renamed_ligand = ligand.replace(" C1  UNL", " CX  UNL")
+    different_ligand = smiles_to_pdb("F[C@@](Cl)(Br)I")
 
-    assert ligand_has_chirality_targets(ligand, [("C1", "S")])
-    assert not ligand_has_chirality_targets(ligand, [("C1", "R")])
-    assert not ligand_has_chirality_targets(renamed_ligand, [("C1", "S")])
+    assert ligand_matches_smiles_chirality(ligand, "F[C@](Cl)(Br)I")
+    assert not ligand_matches_smiles_chirality(different_ligand, "F[C@](Cl)(Br)I")

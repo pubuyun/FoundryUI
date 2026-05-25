@@ -318,6 +318,8 @@ function registerTypes() {
 
   typeRegistry.get("Protein")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Ligand")?.addConversion(typeRegistry.get("Batch Ligand")!, (value) => value);
+  typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
+  typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
   typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
   typeRegistry.get("Batch Ligand")?.addConversion(typeRegistry.get("Ligand")!, (value) => value);
@@ -1029,7 +1031,6 @@ onBeforeUnmount(() => {
     <header class="topbar">
       <div>
         <h1>FoundryUI</h1>
-        <p>Right click the canvas to add Rosetta Foundry nodes.</p>
       </div>
       <nav class="topbar-actions" aria-label="Workflow actions">
         <label class="api-base">

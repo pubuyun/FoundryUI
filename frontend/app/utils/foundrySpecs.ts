@@ -5,6 +5,7 @@ export type PortType =
   | "List of Atoms"
   | "Batch Protein"
   | "Batch Ligand"
+  | "Batch Protein with Ligand"
   | "Batch Protein (With Ligand)"
   | "Batch Sequence"
   | "Score";
@@ -67,6 +68,7 @@ export const typeDetails: Array<{ name: PortType; detail: string }> = [
   { name: "List of Atoms", detail: 'Ligand atom ids such as "C1,O2"' },
   { name: "Batch Protein", detail: "Protein model collection" },
   { name: "Batch Ligand", detail: "Ligand conformer collection" },
+  { name: "Batch Protein with Ligand", detail: "Strict protein-ligand complex collection" },
   { name: "Batch Protein (With Ligand)", detail: "Protein or protein-ligand complex collection" },
   { name: "Batch Sequence", detail: "Sequence collection from FASTA or design output" },
   { name: "Score", detail: "List of score dictionaries from folding/filtering" },
@@ -79,6 +81,7 @@ export const colorsByType: Record<PortType, string> = {
   "List of Atoms": "#e2559b",
   "Batch Protein": "#2368ad",
   "Batch Ligand": "#168b69",
+  "Batch Protein with Ligand": "#c74b67",
   "Batch Protein (With Ligand)": "#c74b67",
   "Batch Sequence": "#7d8b23",
   Score: "#d28a19",
@@ -162,7 +165,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "nBatches", label: "n_batches", kind: "int", value: 1, min: 1 },
       { key: "diffusionBatchSize", label: "diffusion_batch_size", kind: "int", value: 5, min: 1 },
     ],
-    outputs: [{ key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" }],
+    outputs: [{ key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" }],
   },
   {
     type: "LigandMPNN",
@@ -170,7 +173,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     category: "MPNN",
     description: "Ligand-aware sequence design for protein-ligand complexes.",
     inputs: [
-      { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
+      { key: "complexes", label: "Batch Protein with Ligand", type: "Batch Protein with Ligand" },
       { key: "residues", label: "List of Residues: fixed/redesigned", type: "List of Residues", optional: true },
     ],
     options: [
@@ -247,12 +250,12 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     type: "FilterChirality",
     title: "Filter Chirality",
     category: "Filter",
-    description: "Keep complexes whose ligand atoms match selected chirality targets.",
+    description: "Keep complexes whose ligand chirality matches a standard SMILES.",
     inputs: [
       { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score", optional: true },
     ],
-    options: [{ key: "targets", label: "Atom chirality pairs", kind: "textarea", value: "C0:S" }],
+    options: [{ key: "smiles", label: "Standard SMILES", kind: "textarea", value: "" }],
     outputs: [
       { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },

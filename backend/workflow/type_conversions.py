@@ -10,7 +10,7 @@ def is_assignable(source: str, target: str) -> bool:
         return True
     if target == "Batch Protein" and source in {"Batch Protein with Ligand", "Batch Protein (With Ligand)", "Batch Structure"}:
         return True
-    if target in {"Batch Protein with Ligand", "Batch Protein (With Ligand)"} and source in {"Batch Protein", "Batch Structure"}:
+    if target == "Batch Protein (With Ligand)" and source in {"Batch Protein", "Batch Protein with Ligand", "Batch Structure"}:
         return True
     if target == "Protein" and source == "Batch Protein":
         return True
@@ -28,7 +28,7 @@ def convert_payload(payload: TypedPayload, target_type: str) -> TypedPayload:
         return payload.as_batch_structure()
     if target_type == "Batch Protein" and payload.type_name in {"Batch Protein with Ligand", "Batch Protein (With Ligand)", "Batch Structure"}:
         return payload.model_copy(update={"type_name": "Batch Protein"})
-    if target_type in {"Batch Protein with Ligand", "Batch Protein (With Ligand)"} and payload.type_name in {"Batch Protein", "Batch Structure"}:
+    if target_type == "Batch Protein (With Ligand)" and payload.type_name in {"Batch Protein", "Batch Protein with Ligand", "Batch Structure"}:
         return payload.model_copy(update={"type_name": "Batch Protein (With Ligand)"})
     if target_type == "Protein" and payload.type_name == "Batch Protein":
         return payload.first("Protein")

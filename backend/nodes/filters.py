@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import re
-
-from backend.bio.ligand import ligand_has_chirality_targets
+from backend.bio.ligand import ligand_matches_smiles_chirality
 from backend.bio.pdb import split_pdb_complex
 from backend.nodes.common import ExecutionContext, node_dir, option, payload_from_artifacts, read_payload_files, scores_to_rows
 from backend.schemas.errors import BackendError, make_error
@@ -80,11 +78,24 @@ async def filter_chirality(ctx: ExecutionContext, node: WorkflowNode, inputs: di
     if scores is not None:
         ensure_score_alignment(ctx, node, complexes, scores, ["complexes", "score"])
     contents = read_payload_files(ctx, complexes)
-    targets = _chirality_targets(ctx, node)
+    smiles = _chirality_smiles(ctx, node)
     keep = []
     for index, content in enumerate(contents):
         _, complex_ligand = split_pdb_complex(content)
-        if ligand_has_chirality_targets(complex_ligand, targets):
+        try:
+            matches = ligand_matches_smiles_chirality(complex_ligand, smiles)
+        except ValueError as exc:
+            raise BackendError(
+                make_error(
+                    "INVALID_CHIRALITY_SMILES",
+                    str(exc),
+                    run_id=ctx.run_id,
+                    node_id=node.id,
+                    node_type=node.type,
+                    option_key="smiles",
+                )
+            ) from exc
+        if matches:
             keep.append(index)
     out_dir = node_dir(ctx, node)
     artifacts = []
@@ -102,54 +113,17 @@ async def filter_chirality(ctx: ExecutionContext, node: WorkflowNode, inputs: di
     return result
 
 
-def _chirality_targets(ctx: ExecutionContext, node: WorkflowNode) -> list[tuple[str, str]]:
-    raw = option(node, "targets", "")
-    if raw in (None, ""):
-        return []
-    if isinstance(raw, list):
-        return [_target_from_item(ctx, node, item) for item in raw]
-    entries = [entry.strip() for entry in re.split(r"[,;\n]+", str(raw)) if entry.strip()]
-    return [_target_from_text(ctx, node, entry) for entry in entries]
-
-
-def _target_from_item(ctx: ExecutionContext, node: WorkflowNode, item) -> tuple[str, str]:
-    if isinstance(item, dict):
-        atom = str(item.get("atom") or item.get("atomName") or item.get("name") or "").strip()
-        chirality = str(item.get("chirality") or item.get("cip") or "").strip().upper()
-        return _validate_target(ctx, node, atom, chirality, item)
-    if isinstance(item, (list, tuple)) and len(item) == 2:
-        return _validate_target(ctx, node, str(item[0]).strip(), str(item[1]).strip().upper(), item)
-    return _target_from_text(ctx, node, str(item))
-
-
-def _target_from_text(ctx: ExecutionContext, node: WorkflowNode, text: str) -> tuple[str, str]:
-    parts = [part for part in re.split(r"[:=\s]+", text.strip()) if part]
-    if len(parts) != 2:
+def _chirality_smiles(ctx: ExecutionContext, node: WorkflowNode) -> str:
+    smiles = str(option(node, "smiles", "") or "").strip()
+    if not smiles:
         raise BackendError(
             make_error(
-                "INVALID_CHIRALITY_TARGET",
-                "FilterChirality target entries must be atom/chirality pairs like C0:S.",
+                "MISSING_CHIRALITY_SMILES",
+                "FilterChirality requires a standard SMILES option with stereochemistry.",
                 run_id=ctx.run_id,
                 node_id=node.id,
                 node_type=node.type,
-                option_key="targets",
-                details={"entry": text},
+                option_key="smiles",
             )
         )
-    return _validate_target(ctx, node, parts[0], parts[1].upper(), text)
-
-
-def _validate_target(ctx: ExecutionContext, node: WorkflowNode, atom_name: str, chirality: str, source) -> tuple[str, str]:
-    if not atom_name or chirality not in {"R", "S"}:
-        raise BackendError(
-            make_error(
-                "INVALID_CHIRALITY_TARGET",
-                "FilterChirality target entries must include an atom name and chirality R or S.",
-                run_id=ctx.run_id,
-                node_id=node.id,
-                node_type=node.type,
-                option_key="targets",
-                details={"entry": source},
-            )
-        )
-    return atom_name, chirality
+    return smiles

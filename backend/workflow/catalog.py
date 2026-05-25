@@ -94,13 +94,13 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
             ]
         ),
-        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)")]),
+        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
     ),
     "LigandMPNN": NodeSpec(
         "LigandMPNN",
         inputs=_ports(
             [
-                PortSpec("complexes", "Batch Protein (With Ligand)"),
+                PortSpec("complexes", "Batch Protein with Ligand"),
                 PortSpec("residues", "List of Residues", optional=True),
             ]
         ),
@@ -184,7 +184,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
                 PortSpec("score", "Score", optional=True),
             ]
         ),
-        options=_options([OptionSpec("targets", "textarea", "")]),
+        options=_options([OptionSpec("smiles", "textarea", "", required=True)]),
         outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
     ),
     "BinaryLogic": NodeSpec(
