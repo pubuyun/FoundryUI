@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="/opt/FoundryUI"
+ROOT_DIR="/root/FoundryUI"
 BACKEND_HOST="127.0.0.1"
 BACKEND_PORT="8000"
 FRONTEND_HOST="127.0.0.1"
