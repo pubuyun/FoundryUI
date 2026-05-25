@@ -143,6 +143,17 @@ async def stop_run(run_id: str):
     return {"accepted": True, "run_id": run_id, "state": "stopping"}
 
 
+@app.post("/api/runs/{run_id}/input")
+async def submit_run_input(run_id: str, payload: dict[str, Any]):
+    node_id = str(payload.get("node_id") or "")
+    values = payload.get("values") or {}
+    if not node_id or not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail="node_id and values are required.")
+    if not await run_registry.submit_node_input(run_id, node_id, values):
+        raise HTTPException(status_code=404, detail="No pending input request for this node.")
+    return {"accepted": True, "run_id": run_id, "node_id": node_id}
+
+
 @app.get("/api/runs/{run_id}")
 async def get_run(run_id: str):
     status = run_registry.status(run_id)

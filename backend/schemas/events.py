@@ -14,6 +14,7 @@ EventType = Literal[
     "stdout",
     "stderr",
     "node_completed",
+    "input_required",
     "artifact_created",
     "warning",
     "error",

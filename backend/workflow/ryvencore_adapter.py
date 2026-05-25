@@ -81,7 +81,9 @@ class FoundryRyvencoreNode(rc.Node):
                 self.workflow_node.type,
             )
             try:
-                cached = await _reuse_cached_outputs(self.exec_context, self.workflow_node, self.output_keys, cache_key)
+                cached = None
+                if self.workflow_node.type not in {"AtomSelector", "ResidueSelector", "FilterAtomsChirality"}:
+                    cached = await _reuse_cached_outputs(self.exec_context, self.workflow_node, self.output_keys, cache_key)
                 if cached is not None:
                     await self.exec_context.registry.set_node_completed(
                         self.exec_context.run_id,

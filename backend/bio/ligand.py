@@ -94,6 +94,17 @@ def ligand_matches_smiles_chirality(ligand_pdb: str, reference_smiles: str) -> b
     return True
 
 
+def ligand_has_atom_chirality_targets(ligand_pdb: str, targets: list[tuple[str, str]]) -> bool:
+    if not targets:
+        return True
+    mol = _mol_from_pdb(ligand_pdb)
+    if mol is None:
+        return False
+    _assign_3d_stereochemistry(mol)
+    chirality = _chirality_by_atom_name(mol)
+    return all(chirality.get(atom_name) == expected for atom_name, expected in targets)
+
+
 def _mol_from_pdb(content: str):
     if Chem is None:
         raise ValueError("RDKit is required to compare ligand structures.")
@@ -129,6 +140,18 @@ def _assign_3d_stereochemistry(mol) -> None:
             rdCIPLabeler.AssignCIPLabels(mol)
     except Exception:
         Chem.AssignStereochemistry(mol, force=True, cleanIt=True)
+
+
+def _chirality_by_atom_name(mol) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for atom in mol.GetAtoms():
+        info = atom.GetPDBResidueInfo()
+        if info is None:
+            continue
+        atom_name = info.GetName().strip()
+        if atom_name and atom.HasProp("_CIPCode"):
+            labels[atom_name] = atom.GetProp("_CIPCode")
+    return labels
 
 
 def _standard_atom_names(mol, atom_lines: list[str]) -> list[str]:

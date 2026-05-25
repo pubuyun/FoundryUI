@@ -187,6 +187,17 @@ NODE_CATALOG: dict[str, NodeSpec] = {
         options=_options([OptionSpec("smiles", "textarea", "", required=True)]),
         outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
     ),
+    "FilterAtomsChirality": NodeSpec(
+        "FilterAtomsChirality",
+        inputs=_ports(
+            [
+                PortSpec("complexes", "Batch Protein (With Ligand)"),
+                PortSpec("score", "Score", optional=True),
+            ]
+        ),
+        options=_options([OptionSpec("chiralityTargets", "textarea", "")]),
+        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
+    ),
     "BinaryLogic": NodeSpec(
         "BinaryLogic",
         inputs=_ports(

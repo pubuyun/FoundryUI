@@ -8,7 +8,7 @@ from backend.schemas.workflow import RunCreateRequest
 from backend.bio.sequences import pdb_to_sequence
 from backend.bio.ligand import ligand_matches_smiles_chirality, smiles_to_pdb
 from backend.nodes.common import ExecutionContext
-from backend.nodes.filters import filter_chirality
+from backend.nodes.filters import filter_atoms_chirality, filter_chirality
 from backend.schemas.workflow import WorkflowNode
 
 
@@ -203,6 +203,47 @@ def test_filter_chirality_keeps_only_matching_smiles_chirality() -> None:
                 ),
             },
         )
+
+        assert result["complexes"].item_count == 1
+        assert " CL1 " in result["complexes"].data[0]
+
+    asyncio.run(execute())
+
+
+def test_filter_atoms_chirality_waits_for_targets_and_filters() -> None:
+    async def execute() -> None:
+        run_id = "run_test_filter_atoms_chirality"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        node = WorkflowNode(id="filter_atoms", type="FilterAtomsChirality", options={})
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        matching_ligand = smiles_to_pdb("F[C@](Cl)(Br)I")
+        different_ligand = smiles_to_pdb("F[C@@](Cl)(Br)I")
+        matching = artifact_store.write_text(run_id=run_id, path=root / "matching_atoms.pdb", content=PDB.replace("END\n", "") + matching_ligand, payload_type="Batch Protein (With Ligand)")
+        different = artifact_store.write_text(run_id=run_id, path=root / "different_atoms.pdb", content=PDB.replace("END\n", "") + different_ligand, payload_type="Batch Protein (With Ligand)")
+
+        task = asyncio.create_task(
+            filter_atoms_chirality(
+                ctx,
+                node,
+                {
+                    "complexes": TypedPayload(
+                        type_name="Batch Protein (With Ligand)",
+                        item_count=2,
+                        artifact_ids=[matching.artifact_id, different.artifact_id],
+                        paths=[matching.path, different.path],
+                        data=[PDB + matching_ligand, PDB + different_ligand],
+                    ),
+                },
+            )
+        )
+        for _ in range(20):
+            if run_registry.get(run_id).pending_inputs:
+                break
+            await asyncio.sleep(0.01)
+        assert await run_registry.submit_node_input(run_id, "filter_atoms", {"chiralityTargets": "C1:S"})
+        result = await task
 
         assert result["complexes"].item_count == 1
         assert " CL1 " in result["complexes"].data[0]

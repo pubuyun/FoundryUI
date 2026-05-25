@@ -43,6 +43,14 @@ interface ViewerModal {
   style: "cartoon" | "stick" | "surface";
 }
 
+interface PendingRunInput {
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  fields: string[];
+  payloads: Record<string, any>;
+}
+
 interface BackendArtifact {
   artifact_id: string;
   payload_type: string;
@@ -132,6 +140,7 @@ const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
 const viewerEl = ref<HTMLElement | null>(null);
 const workflowFileInput = ref<HTMLInputElement | null>(null);
 const viewerRuntimeFiles = ref<UploadedStructure[]>([]);
+const pendingRunInput = ref<PendingRunInput | null>(null);
 const viewerModal = reactive<ViewerModal>({
   open: false,
   nodeId: "",
@@ -367,6 +376,10 @@ function primaryNodeColor(node: AbstractNode) {
   return portColor(output || input ? getType((output ?? input)!) : undefined);
 }
 
+function nodeRequiresRuntimeInput(node: AbstractNode) {
+  return Boolean(specForNode(node)?.requiresRuntimeInput);
+}
+
 function connectionColor(connection: Connection) {
   return portColor(getType(connection.from));
 }
@@ -377,6 +390,7 @@ function nodeByModal() {
 
 function selectorInterface(node = nodeByModal()) {
   if (!node) return undefined;
+  if (pendingRunInput.value?.fields.includes("chiralityTargets")) return node.inputs.chiralityTargets as NodeInterfaceTypeBase<string> | undefined;
   if (viewerModal.mode === "atom") return node.inputs.atoms as NodeInterfaceTypeBase<string> | undefined;
   if (viewerModal.mode === "residue") return node.inputs.residues as NodeInterfaceTypeBase<string> | undefined;
   return undefined;
@@ -412,9 +426,56 @@ function residueId(atom: any) {
 }
 
 function toggleSelectorItem(value: string) {
+  if (pendingRunInput.value?.fields.includes("chiralityTargets")) {
+    const targets = parseChiralityTargets();
+    const existing = targets.find((target) => target.atom === value);
+    const next = existing ? targets.filter((target) => target.atom !== value) : [...targets, { atom: value, chirality: "R" }];
+    setSelectorValue(formatChiralityTargets(next));
+    return;
+  }
   const values = parseSelectorList();
   const next = values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
   setSelectorValue(next.join(","));
+}
+
+function parseChiralityTargets(value = selectorValue()) {
+  return value
+    .split(/[,;\n]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [atom, chirality] = entry.split(/[:=\s]+/);
+      return { atom: atom ?? "", chirality: (chirality ?? "R").toUpperCase() === "S" ? "S" : "R" };
+    })
+    .filter((target) => target.atom);
+}
+
+function formatChiralityTargets(targets: Array<{ atom: string; chirality: string }>) {
+  return targets.map((target) => `${target.atom}:${target.chirality === "S" ? "S" : "R"}`).join(", ");
+}
+
+function setChiralityTarget(atom: string, chirality: string) {
+  setSelectorValue(formatChiralityTargets(parseChiralityTargets().map((target) => (target.atom === atom ? { ...target, chirality } : target))));
+}
+
+function removeChiralityTarget(atom: string) {
+  setSelectorValue(formatChiralityTargets(parseChiralityTargets().filter((target) => target.atom !== atom)));
+}
+
+async function submitRuntimeInput() {
+  if (!pendingRunInput.value) return;
+  const values: Record<string, string> = {};
+  pendingRunInput.value.fields.forEach((field) => {
+    const node = baklava.editor.graph.findNodeById(pendingRunInput.value!.nodeId);
+    values[field] = String(node?.inputs[field]?.value ?? "");
+  });
+  await postJson(`/api/runs/${pendingRunInput.value.runId}/input`, {
+    node_id: pendingRunInput.value.nodeId,
+    values,
+  });
+  runMessage.value = "Input submitted";
+  pendingRunInput.value = null;
+  closeViewer();
 }
 
 function specForNode(node: AbstractNode) {
@@ -770,6 +831,7 @@ function connectRunEvents(runId: string) {
     "stdout",
     "stderr",
     "node_completed",
+    "input_required",
     "artifact_created",
     "warning",
     "error",
@@ -809,6 +871,10 @@ function handleRunEvent(event: RunEventPayload) {
     void loadOutputs(event.run_id);
   } else if (event.event === "artifact_created") {
     void refreshRunFiles(event.run_id);
+  } else if (event.event === "input_required") {
+    runState.value = "running";
+    runMessage.value = `${event.node_type ?? "Node"} needs input`;
+    void openRuntimeInput(event);
   } else if (event.event === "error") {
     runState.value = "failed";
     runMessage.value = event.message ?? "Run failed";
@@ -873,6 +939,9 @@ function markNodeCached(nodeId: string) {
 }
 
 async function openViewer(nodeId: string, title: string, mode: ViewerModal["mode"]) {
+  if (pendingRunInput.value?.nodeId !== nodeId) {
+    pendingRunInput.value = null;
+  }
   viewerModal.open = true;
   viewerModal.nodeId = nodeId;
   viewerModal.title = title;
@@ -880,6 +949,31 @@ async function openViewer(nodeId: string, title: string, mode: ViewerModal["mode
   viewerModal.fileIndex = 0;
   viewerRuntimeFiles.value = [];
   await loadViewerRuntimeFiles(nodeId);
+  void nextTick(initializeViewer);
+}
+
+async function openRuntimeInput(event: RunEventPayload) {
+  if (!event.node_id || !event.node_type) return;
+  const node = baklava.editor.graph.findNodeById(event.node_id);
+  pendingRunInput.value = {
+    runId: event.run_id,
+    nodeId: event.node_id,
+    nodeType: event.node_type,
+    fields: event.data?.fields ?? [],
+    payloads: event.data?.payloads ?? {},
+  };
+  if (event.data?.defaults && node) {
+    Object.entries(event.data.defaults).forEach(([key, value]) => {
+      const intf = node.inputs[key];
+      if (intf) intf.value = String(value ?? "");
+    });
+  }
+  viewerModal.open = true;
+  viewerModal.nodeId = event.node_id;
+  viewerModal.title = node?.title ?? event.node_type;
+  viewerModal.mode = event.node_type === "ResidueSelector" ? "residue" : "atom";
+  viewerModal.fileIndex = 0;
+  viewerRuntimeFiles.value = await runtimeFilesFromPayloads(pendingRunInput.value.payloads);
   void nextTick(initializeViewer);
 }
 
@@ -904,19 +998,32 @@ function connectedSourceOutput(node: AbstractNode) {
 
 async function loadViewerRuntimeFiles(nodeId: string) {
   const node = baklava.editor.graph.findNodeById(nodeId);
-  if (!node || node.type !== "PDBViewer") return;
+  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector"].includes(String(node.type))) return;
   const output = connectedSourceOutput(node);
   if (!output?.artifact_ids.length) return;
-  const artifactById = new Map(artifacts.value.map((artifact) => [artifact.artifact_id, artifact]));
+  viewerRuntimeFiles.value = await runtimeFilesFromArtifactIds(output.artifact_ids, output.paths);
+}
+
+async function runtimeFilesFromPayloads(payloads: Record<string, any>) {
   const files: UploadedStructure[] = [];
-  for (const artifactId of output.artifact_ids) {
-    const artifact = artifactById.get(artifactId);
-    if (!artifact || artifact.media_type !== "chemical/x-pdb") continue;
-    const response = await fetch(artifactUrl(artifact));
-    if (!response.ok) continue;
-    files.push({ name: artifact.path.split("/").pop() || artifact.path, type: "pdb", content: await response.text() });
+  for (const payload of Object.values(payloads)) {
+    files.push(...await runtimeFilesFromArtifactIds(payload?.artifact_ids ?? [], payload?.paths ?? []));
   }
-  viewerRuntimeFiles.value = files;
+  return files;
+}
+
+async function runtimeFilesFromArtifactIds(artifactIds: string[], paths: string[] = []) {
+  const files: UploadedStructure[] = [];
+  const artifactById = new Map(artifacts.value.map((artifact) => [artifact.artifact_id, artifact]));
+  for (const [index, artifactId] of artifactIds.entries()) {
+    const artifact = artifactById.get(artifactId);
+    if (artifact && artifact.media_type !== "chemical/x-pdb") continue;
+    const response = await fetch(artifact ? artifactUrl(artifact) : apiUrl(`/api/artifacts/${artifactId}`));
+    if (!response.ok) continue;
+    const path = artifact?.path ?? paths[index] ?? artifactId;
+    files.push({ name: path.split("/").pop() || path, type: "pdb", content: await response.text() });
+  }
+  return files;
 }
 
 function structuresForNodeId(nodeId: string, seen = new Set<string>()): UploadedStructure[] {
@@ -964,7 +1071,7 @@ function renderViewer() {
     viewer.setStyle({ hetflag: false }, { cartoon: { color: "spectrum" } });
     viewer.setStyle({ hetflag: true }, { stick: { colorscheme: "greenCarbon", radius: 0.22 } });
   }
-  const selected = new Set(parseSelectorList());
+  const selected = new Set(pendingRunInput.value?.fields.includes("chiralityTargets") ? parseChiralityTargets().map((target) => target.atom) : parseSelectorList());
   if (viewerModal.mode === "atom") {
     selected.forEach((name) => {
       viewer.addStyle({ atom: name }, { sphere: { color: "orange", radius: 0.45 } });
@@ -1007,6 +1114,7 @@ baklava.hooks.renderInterface.subscribe("foundry-colors", ({ intf, el }) => {
 
 baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
   el.style.setProperty("--foundry-node-color", primaryNodeColor(node));
+  el.classList.toggle("foundry-node-manual", nodeRequiresRuntimeInput(node));
   el.classList.toggle("foundry-node-error", errorNodeIds.value.has(node.id));
   el.classList.toggle("foundry-node-cached", cachedNodeIds.value.has(node.id));
   return { node, el };
@@ -1170,6 +1278,17 @@ onBeforeUnmount(() => {
               @input="setSelectorValue(($event.target as HTMLInputElement).value)"
             />
           </label>
+          <div v-if="pendingRunInput?.fields.includes('chiralityTargets')" class="chirality-targets">
+            <div v-for="target in parseChiralityTargets()" :key="target.atom" class="chirality-target">
+              <span>{{ target.atom }}</span>
+              <select :value="target.chirality" @change="setChiralityTarget(target.atom, ($event.target as HTMLSelectElement).value)">
+                <option value="R">R</option>
+                <option value="S">S</option>
+              </select>
+              <button type="button" class="icon-button" title="Remove target" @click="removeChiralityTarget(target.atom)">X</button>
+            </div>
+          </div>
+          <button v-if="pendingRunInput" type="button" class="run-button" @click="submitRuntimeInput">Submit</button>
         </div>
         <div ref="viewerEl" class="viewer-surface" />
         <p v-if="activeModalFile?.type === 'fasta'" class="sequence-preview">{{ activeModalFile.content || "No sequence content loaded." }}</p>
@@ -1601,6 +1720,23 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 2px rgba(126, 224, 196, 0.72);
 }
 
+.baklava-node.foundry-node-manual {
+  border-style: dashed;
+  box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.55);
+}
+
+.baklava-node.foundry-node-manual::after {
+  content: "manual";
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  color: #ffb86b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .node-file-upload {
   display: grid;
   gap: 5px;
@@ -1718,6 +1854,37 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   background: #ffffff;
   color: #17202a;
+}
+
+.chirality-targets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.chirality-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid #d9b56d;
+  border-radius: 6px;
+  background: #fff8e8;
+  color: #2d261a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chirality-target select {
+  width: 52px;
+  height: 26px;
+}
+
+.chirality-target .icon-button {
+  width: 24px;
+  height: 24px;
 }
 
 .viewer-surface {

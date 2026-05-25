@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.nodes.filters import filter_chirality, filter_by_score
+from backend.nodes.filters import filter_atoms_chirality, filter_chirality, filter_by_score
 from backend.nodes.folding import rosetta_fold
 from backend.nodes.generation import rfdiffusion_smbinder
 from backend.nodes.inputs import ligand_input, protein_input, sequence_input
@@ -33,6 +33,7 @@ HANDLERS = {
     "RosettaFold3": rosetta_fold,
     "FilterByScore": filter_by_score,
     "FilterChirality": filter_chirality,
+    "FilterAtomsChirality": filter_atoms_chirality,
     "BinaryLogic": binary_logic,
     "Protein2Seq": protein_to_seq,
     "Merge": merge,

@@ -39,6 +39,7 @@ export interface FoundryNodeSpec {
   inputs?: PortSpec[];
   options?: OptionSpec[];
   outputs?: PortSpec[];
+  requiresRuntimeInput?: boolean;
 }
 
 export const proteinExample = `ATOM      1  N   GLY A  58      -6.730  -1.637   0.000  1.00 40.00           N
@@ -100,6 +101,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     title: "Residue Selector",
     category: "Selector",
     description: 'Use a node-local 3D viewer or type residue ids such as "A103,A201".',
+    requiresRuntimeInput: true,
     inputs: [{ key: "protein", label: "Protein", type: "Protein", optional: true }],
     options: [
       { key: "residues", label: "Text Field", kind: "text", value: "A103,A201" },
@@ -112,6 +114,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     title: "Atom Selector",
     category: "Selector",
     description: 'Use a node-local 3D viewer or type atom ids such as "C1,C2".',
+    requiresRuntimeInput: true,
     inputs: [{ key: "ligand", label: "Ligand", type: "Ligand", optional: true }],
     options: [
       { key: "atoms", label: "Text Field", kind: "text", value: "C1,C2" },
@@ -256,6 +259,22 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "score", label: "Score", type: "Score", optional: true },
     ],
     options: [{ key: "smiles", label: "Standard SMILES", kind: "textarea", value: "" }],
+    outputs: [
+      { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
+      { key: "score", label: "Score", type: "Score" },
+    ],
+  },
+  {
+    type: "FilterAtomsChirality",
+    title: "Filter Atoms Chirality",
+    category: "Filter",
+    description: "Pause at runtime and keep complexes whose selected ligand atoms match R/S chirality.",
+    requiresRuntimeInput: true,
+    inputs: [
+      { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
+      { key: "score", label: "Score", type: "Score", optional: true },
+    ],
+    options: [{ key: "chiralityTargets", label: "Atom chirality targets", kind: "textarea", value: "" }],
     outputs: [
       { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },

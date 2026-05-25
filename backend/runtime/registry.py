@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +30,7 @@ class RunRecord:
     request: Any = None
     outputs: dict[tuple[str, str], Any] = field(default_factory=dict)
     node_cache_keys: dict[str, str] = field(default_factory=dict)
+    pending_inputs: dict[str, Future[dict[str, Any]]] = field(default_factory=dict)
 
     @property
     def progress_percent(self) -> float:
@@ -125,6 +127,10 @@ class RunRegistry:
         if record is None:
             return False
         record.cancel_requested = True
+        for future in record.pending_inputs.values():
+            if not future.done():
+                future.cancel()
+        record.pending_inputs.clear()
         if record.state == "queued":
             record.state = "stopped"
             await self.publish(RunEvent(event="stopped", run_id=run_id, message="Run stopped."))
@@ -136,6 +142,10 @@ class RunRegistry:
 
     async def stop(self, run_id: str) -> None:
         record = self.records[run_id]
+        for future in record.pending_inputs.values():
+            if not future.done():
+                future.cancel()
+        record.pending_inputs.clear()
         record.state = "stopped"
         record.current_node_id = None
         record.current_node_type = None
@@ -148,6 +158,36 @@ class RunRegistry:
     async def record_node_cache_key(self, run_id: str, node_id: str, cache_key: str) -> None:
         record = self.records[run_id]
         record.node_cache_keys[node_id] = cache_key
+
+    async def request_node_input(self, run_id: str, node_id: str, node_type: str, fields: list[str], payloads: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+        record = self.records[run_id]
+        future: Future[dict[str, Any]] = Future()
+        record.pending_inputs[node_id] = future
+        await self.publish(
+            RunEvent(
+                event="input_required",
+                run_id=run_id,
+                node_id=node_id,
+                node_type=node_type,
+                message=f"{node_type} requires user input.",
+                data={"fields": fields, "payloads": payloads, "defaults": defaults},
+            )
+        )
+        try:
+            return await asyncio.wrap_future(future)
+        finally:
+            record.pending_inputs.pop(node_id, None)
+
+    async def submit_node_input(self, run_id: str, node_id: str, values: dict[str, Any]) -> bool:
+        record = self.records.get(run_id)
+        if record is None:
+            return False
+        future = record.pending_inputs.get(node_id)
+        if future is None or future.done():
+            return False
+        future.set_result(values)
+        await self.publish(RunEvent(event="node_progress", run_id=run_id, node_id=node_id, message="User input received."))
+        return True
 
     async def add_warning(self, run_id: str, warning: StructuredError) -> None:
         record = self.records[run_id]
