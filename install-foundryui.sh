@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/pubuyun/FoundryUI.git}"
-INSTALL_DIR="${INSTALL_DIR:-/root/FoundryUI}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/FoundryUI}"
 SERVICE_NAME="${SERVICE_NAME:-foundryui}"
 SERVICE_USER="${SERVICE_USER:-${SUDO_USER:-${USER:-root}}}"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
