@@ -46,6 +46,11 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/health")
+async def api_health() -> dict[str, str]:
+    return await health()
+
+
 def _ensure_worker() -> None:
     global _worker_task
     if _worker_task is None or _worker_task.done():

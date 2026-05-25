@@ -8,7 +8,7 @@ interface SessionRecord {
   latest_run_id?: string | null;
 }
 
-const DEFAULT_API_BASE = "http://127.0.0.1:8000";
+const DEFAULT_API_BASE = "http://127.0.0.1:3000/api";
 const apiBase = ref(DEFAULT_API_BASE);
 const apiStatus = ref<"idle" | "checking" | "available" | "unavailable">("idle");
 const sessions = ref<SessionRecord[]>([]);
@@ -24,7 +24,11 @@ function apiUrl(path: string) {
   if (!base) {
     throw new Error("Enter an API URL and click Connect.");
   }
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  let requestPath = path.startsWith("/") ? path : `/${path}`;
+  if (base.endsWith("/api") && requestPath.startsWith("/api/")) {
+    requestPath = requestPath.slice(4);
+  }
+  return `${base}${requestPath}`;
 }
 
 function restoreApiBase() {
@@ -125,7 +129,7 @@ onMounted(() => {
       <nav class="sessions-actions">
         <label>
           API
-          <input v-model="apiBase" placeholder="http://127.0.0.1:8000" spellcheck="false" @keyup.enter="connectApi" />
+          <input v-model="apiBase" placeholder="http://127.0.0.1:3000/api" spellcheck="false" @keyup.enter="connectApi" />
         </label>
         <button type="button" class="secondary-button" :disabled="apiStatus === 'checking'" @click="connectApi">
           {{ apiStatus === "checking" ? "Checking" : "Connect" }}

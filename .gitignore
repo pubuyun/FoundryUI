@@ -23,6 +23,7 @@ backend/sessions/
 .env.*
 !.env.example
 .DS_Store
+runtime/
 
 # External source checkouts
 foundry/

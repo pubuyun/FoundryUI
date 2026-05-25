@@ -107,7 +107,8 @@ baklava.settings.palette.enabled = false;
 const registeredConstructors = new Map<string, ReturnType<typeof defineNode>>();
 const typeRegistry = new Map<PortType, NodeInterfaceType<any>>();
 const uploadedByNode = reactive<Record<string, UploadedStructure[]>>({});
-const apiBase = ref("");
+const DEFAULT_API_BASE = "http://127.0.0.1:3000/api";
+const apiBase = ref(DEFAULT_API_BASE);
 const apiStatus = ref<"idle" | "checking" | "available" | "unavailable">("idle");
 const apiMessage = ref("Enter API URL");
 const runState = ref<"idle" | "validating" | "queued" | "running" | "completed" | "failed" | "stopped">("idle");
@@ -150,15 +151,17 @@ function apiUrl(path: string) {
   if (!base) {
     throw new Error("Enter an API URL and click Connect.");
   }
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  let requestPath = path.startsWith("/") ? path : `/${path}`;
+  if (base.endsWith("/api") && requestPath.startsWith("/api/")) {
+    requestPath = requestPath.slice(4);
+  }
+  return `${base}${requestPath}`;
 }
 
 function restoreApiBase() {
   if (!import.meta.client) return;
-  apiBase.value = localStorage.getItem("foundryui-api-base") ?? "";
-  if (apiBase.value) {
-    apiMessage.value = "API URL loaded";
-  }
+  apiBase.value = localStorage.getItem("foundryui-api-base") ?? DEFAULT_API_BASE;
+  apiMessage.value = apiBase.value === DEFAULT_API_BASE ? "Using default local API" : "API URL loaded";
 }
 
 async function connectApi() {
@@ -1031,7 +1034,7 @@ onBeforeUnmount(() => {
       <nav class="topbar-actions" aria-label="Workflow actions">
         <label class="api-base">
           API
-          <input v-model="apiBase" placeholder="https://api.example.com" spellcheck="false" @keyup.enter="connectApi" />
+          <input v-model="apiBase" placeholder="http://127.0.0.1:3000/api" spellcheck="false" @keyup.enter="connectApi" />
         </label>
         <button type="button" class="connect-button" :disabled="apiStatus === 'checking'" @click="connectApi">
           {{ apiStatus === "checking" ? "Checking" : "Connect" }}
@@ -1518,10 +1521,11 @@ onBeforeUnmount(() => {
 }
 
 .baklava-context-menu {
-  width: max-content;
+  width: max-content !important;
   min-width: 220px;
-  max-width: min(720px, calc(100vw - 32px));
-  overflow: visible;
+  max-width: none !important;
+  max-height: none !important;
+  overflow: visible !important;
   border: 1px solid rgba(190, 207, 226, 0.24);
   border-radius: 8px !important;
 }
@@ -1529,6 +1533,10 @@ onBeforeUnmount(() => {
 .baklava-context-menu > .item {
   min-height: 30px;
   border-left: 4px solid #6d7681;
+  white-space: nowrap;
+}
+
+.baklava-context-menu > .item > .__label {
   white-space: nowrap;
 }
 
@@ -1556,15 +1564,16 @@ onBeforeUnmount(() => {
   border-left-color: #e2559b;
 }
 
-@media (max-height: 760px) {
-  .baklava-context-menu {
-    min-width: 440px;
+@media (max-height: 760px), (max-width: 900px) {
+  .baklava-context-menu:not(.--nested) {
+    min-width: min(560px, calc(100vw - 32px));
     column-count: 2;
     column-gap: 0;
+    column-fill: balance;
   }
 
-  .baklava-context-menu > .item,
-  .baklava-context-menu > .divider {
+  .baklava-context-menu:not(.--nested) > .item,
+  .baklava-context-menu:not(.--nested) > .divider {
     break-inside: avoid;
   }
 }

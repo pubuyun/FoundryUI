@@ -9,6 +9,8 @@ BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+FRONTEND_INTERNAL_HOST="${FRONTEND_INTERNAL_HOST:-127.0.0.1}"
+FRONTEND_INTERNAL_PORT="${FRONTEND_INTERNAL_PORT:-3001}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -35,7 +37,7 @@ require_command() {
 
 install_basic_packages_if_possible() {
   local missing=()
-  for cmd in git curl npm node systemctl; do
+  for cmd in git curl npm node nginx; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
 
@@ -48,7 +50,7 @@ install_basic_packages_if_possible() {
     as_root apt-get update
     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
     as_root apt-get install -y nodejs
-    as_root apt-get install -y git curl systemd
+    as_root apt-get install -y git curl nginx
   else
     fail "Missing commands: ${missing[*]}. Install them first, then rerun this script."
   fi
@@ -114,16 +116,21 @@ BACKEND_HOST="$BACKEND_HOST"
 BACKEND_PORT="$BACKEND_PORT"
 FRONTEND_HOST="$FRONTEND_HOST"
 FRONTEND_PORT="$FRONTEND_PORT"
+FRONTEND_INTERNAL_HOST="$FRONTEND_INTERNAL_HOST"
+FRONTEND_INTERNAL_PORT="$FRONTEND_INTERNAL_PORT"
+NGINX_PREFIX="\$ROOT_DIR/runtime/nginx"
+NGINX_CONFIG="\$ROOT_DIR/nginx-foundryui.conf"
 
 export FOUNDRY_CHECKPOINT_DIRS="\$ROOT_DIR/models"
 export FOUNDRYUI_RFD3_CKPT="\${FOUNDRYUI_RFD3_CKPT:-\$ROOT_DIR/models/rfd3_latest.ckpt}"
-export FOUNDRYUI_RF3_CKPT="\${FOUNDRYUI_RF3_CKPT:-\$ROOT_DIR/models/rf3_foundry_2025_12_01_remapped.ckpt}"
-export HOST="\$FRONTEND_HOST"
-export PORT="\$FRONTEND_PORT"
-export NITRO_HOST="\$FRONTEND_HOST"
-export NITRO_PORT="\$FRONTEND_PORT"
+export FOUNDRYUI_RF3_CKPT="\${FOUNDRYUI_RF3_CKPT:-\$ROOT_DIR/models/rf3_foundry_01_24_latest_remapped.ckpt}"
+export HOST="\$FRONTEND_INTERNAL_HOST"
+export PORT="\$FRONTEND_INTERNAL_PORT"
+export NITRO_HOST="\$FRONTEND_INTERNAL_HOST"
+export NITRO_PORT="\$FRONTEND_INTERNAL_PORT"
 
 cd "\$ROOT_DIR"
+mkdir -p "\$NGINX_PREFIX/logs" "\$NGINX_PREFIX/tmp/client_body" "\$NGINX_PREFIX/tmp/proxy" "\$NGINX_PREFIX/tmp/fastcgi" "\$NGINX_PREFIX/tmp/uwsgi" "\$NGINX_PREFIX/tmp/scgi"
 
 "\$ROOT_DIR/.venv/bin/uvicorn" backend.main:app --host "\$BACKEND_HOST" --port "\$BACKEND_PORT" &
 backend_pid="\$!"
@@ -131,13 +138,16 @@ backend_pid="\$!"
 node "\$ROOT_DIR/frontend/.output/server/index.mjs" &
 frontend_pid="\$!"
 
+nginx -p "\$NGINX_PREFIX/" -c "\$NGINX_CONFIG" -g "daemon off;" &
+nginx_pid="\$!"
+
 shutdown() {
-  kill "\$backend_pid" "\$frontend_pid" 2>/dev/null || true
-  wait "\$backend_pid" "\$frontend_pid" 2>/dev/null || true
+  kill "\$backend_pid" "\$frontend_pid" "\$nginx_pid" 2>/dev/null || true
+  wait "\$backend_pid" "\$frontend_pid" "\$nginx_pid" 2>/dev/null || true
 }
 trap shutdown INT TERM
 
-wait -n "\$backend_pid" "\$frontend_pid"
+wait -n "\$backend_pid" "\$frontend_pid" "\$nginx_pid"
 status="\$?"
 shutdown
 exit "\$status"
@@ -145,32 +155,68 @@ EOF
   chmod +x "$runtime_script"
 }
 
-write_systemd_service() {
-  local unit_path="/etc/systemd/system/${SERVICE_NAME}.service"
-  log "Writing systemd unit to $unit_path"
-  as_root tee "$unit_path" >/dev/null <<EOF
-[Unit]
-Description=FoundryUI backend and frontend
-After=network-online.target
-Wants=network-online.target
+write_nginx_config() {
+  local config_path="$INSTALL_DIR/nginx-foundryui.conf"
+  local nginx_prefix="$INSTALL_DIR/runtime/nginx"
+  log "Writing Nginx reverse proxy config to $config_path"
+  mkdir -p "$nginx_prefix/logs" "$nginx_prefix/tmp/client_body" "$nginx_prefix/tmp/proxy" "$nginx_prefix/tmp/fastcgi" "$nginx_prefix/tmp/uwsgi" "$nginx_prefix/tmp/scgi"
+  cat >"$config_path" <<EOF
+worker_processes 1;
+error_log logs/error.log;
+pid logs/nginx.pid;
 
-[Service]
-Type=simple
-User=$SERVICE_USER
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/run-foundryui-service.sh
-Restart=on-failure
-RestartSec=5
-KillMode=control-group
-Environment=PYTHONUNBUFFERED=1
+events {
+    worker_connections 1024;
+}
 
-[Install]
-WantedBy=multi-user.target
+http {
+    access_log logs/access.log;
+    client_body_temp_path tmp/client_body;
+    proxy_temp_path tmp/proxy;
+    fastcgi_temp_path tmp/fastcgi;
+    uwsgi_temp_path tmp/uwsgi;
+    scgi_temp_path tmp/scgi;
+
+    server {
+        listen ${FRONTEND_HOST}:${FRONTEND_PORT};
+        server_name _;
+        client_max_body_size 2g;
+
+        location /api/ {
+            proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Connection "";
+            proxy_buffering off;
+            proxy_read_timeout 86400;
+            proxy_send_timeout 86400;
+        }
+
+        location = /api {
+            return 308 /api/health;
+        }
+
+        location / {
+            proxy_pass http://${FRONTEND_INTERNAL_HOST}:${FRONTEND_INTERNAL_PORT};
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+}
 EOF
 
-  as_root systemctl daemon-reload
-  as_root systemctl enable "$SERVICE_NAME"
-  as_root systemctl restart "$SERVICE_NAME"
+  nginx -p "$nginx_prefix/" -c "$config_path" -t
+  if [[ "$SERVICE_USER" != "root" ]]; then
+    as_root chown -R "$SERVICE_USER:" "$config_path" "$nginx_prefix"
+  fi
 }
 
 print_summary() {
@@ -178,20 +224,24 @@ print_summary() {
 
 FoundryUI deployment is complete.
 
-Service:
-  systemctl status $SERVICE_NAME
-  journalctl -u $SERVICE_NAME -f
-  systemctl restart $SERVICE_NAME
+Run:
+  $INSTALL_DIR/run-foundryui-service.sh
 
 URLs:
   Frontend: http://$FRONTEND_HOST:$FRONTEND_PORT
+  API:      http://$FRONTEND_HOST:$FRONTEND_PORT/api
   Backend:  http://$BACKEND_HOST:$BACKEND_PORT/health
+
+Nginx:
+  Started by $INSTALL_DIR/run-foundryui-service.sh
+  Config: $INSTALL_DIR/nginx-foundryui.conf
 
 Install directory:
   $INSTALL_DIR
 
 To customize a future install, set environment variables before running:
-  REPO_URL, INSTALL_DIR, SERVICE_NAME, SERVICE_USER, BACKEND_HOST, BACKEND_PORT, FRONTEND_HOST, FRONTEND_PORT
+  REPO_URL, INSTALL_DIR, SERVICE_NAME, SERVICE_USER, BACKEND_HOST, BACKEND_PORT,
+  FRONTEND_HOST, FRONTEND_PORT, FRONTEND_INTERNAL_HOST, FRONTEND_INTERNAL_PORT
 
 EOF
 }
@@ -203,14 +253,14 @@ main() {
   require_command curl
   require_command npm
   require_command node
-  require_command systemctl
+  require_command nginx
   check_node_version
-  clone_or_update_repo
-  run_project_setup
+#  clone_or_update_repo
+#  run_project_setup
   build_frontend
-  ensure_service_user_can_write
+#  ensure_service_user_can_write
   write_runtime_script
-  write_systemd_service
+  write_nginx_config
   print_summary
 }
 
