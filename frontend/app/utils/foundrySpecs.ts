@@ -298,7 +298,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     description: "Fold batch sequences, optionally with ligand co-folding.",
     inputs: [
       { key: "sequences", label: "Batch Sequence", type: "Batch Sequence" },
-      { key: "ligand", label: "Ligand", type: "Ligand", optional: true },
+      { key: "ligand", label: "Batch Ligand", type: "Batch Ligand", optional: true },
     ],
     options: [
       { key: "earlyStoppingPlddtThreshold", label: "early_stopping_plddt_threshold", kind: "float", value: 0.5, min: 0, max: 1 },

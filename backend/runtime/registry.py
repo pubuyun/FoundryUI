@@ -31,6 +31,7 @@ class RunRecord:
     outputs: dict[tuple[str, str], Any] = field(default_factory=dict)
     node_cache_keys: dict[str, str] = field(default_factory=dict)
     pending_inputs: dict[str, Future[dict[str, Any]]] = field(default_factory=dict)
+    submitted_input_node_ids: set[str] = field(default_factory=set)
 
     @property
     def progress_percent(self) -> float:
@@ -163,6 +164,7 @@ class RunRegistry:
         record = self.records[run_id]
         future: Future[dict[str, Any]] = Future()
         record.pending_inputs[node_id] = future
+        record.submitted_input_node_ids.discard(node_id)
         await self.publish(
             RunEvent(
                 event="input_required",
@@ -185,6 +187,7 @@ class RunRegistry:
         future = record.pending_inputs.get(node_id)
         if future is None or future.done():
             return False
+        record.submitted_input_node_ids.add(node_id)
         future.set_result(values)
         await self.publish(RunEvent(event="node_progress", run_id=run_id, node_id=node_id, message="User input received."))
         return True
@@ -207,6 +210,8 @@ class RunRegistry:
             return None
         queue: asyncio.Queue[RunEvent] = asyncio.Queue()
         for event in record.events:
+            if event.event == "input_required" and (event.node_id not in record.pending_inputs or event.node_id in record.submitted_input_node_ids):
+                continue
             await queue.put(event)
         record.subscribers.append(queue)
         return queue

@@ -591,6 +591,7 @@ async function submitRuntimeInput() {
   runMessage.value = "Input submitted";
   setNodePendingInput(pendingRunInput.value.nodeId, false);
   pendingRunInput.value = null;
+  await saveSessionDocument();
   closeViewer();
 }
 
@@ -1004,6 +1005,10 @@ function handleRunEvent(event: RunEventPayload) {
   } else if (event.event === "node_completed") {
     runMessage.value = `${event.node_type ?? "Node"} completed`;
     if (event.node_id) setNodePendingInput(event.node_id, false);
+    if (event.node_id && pendingRunInput.value?.nodeId === event.node_id) {
+      pendingRunInput.value = null;
+      closeViewer();
+    }
     if (event.node_id && event.data?.cached) markNodeCached(event.node_id);
     void refreshRunStatus(event.run_id);
     void loadOutputs(event.run_id);
@@ -1013,6 +1018,12 @@ function handleRunEvent(event: RunEventPayload) {
     runState.value = "running";
     runMessage.value = `${event.node_type ?? "Node"} needs input`;
     void openRuntimeInput(event);
+  } else if (event.event === "node_progress" && event.node_id && event.message === "User input received.") {
+    setNodePendingInput(event.node_id, false);
+    if (pendingRunInput.value?.nodeId === event.node_id) {
+      pendingRunInput.value = null;
+      closeViewer();
+    }
   } else if (event.event === "error") {
     runState.value = "failed";
     runMessage.value = event.message ?? "Run failed";
@@ -1371,7 +1382,6 @@ onBeforeUnmount(() => {
         </button>
         <span class="api-feedback" :class="apiStatus">{{ apiMessage }}</span>
         <span v-if="currentSessionId" class="session-chip">{{ currentSessionId.slice(0, 18) }}</span>
-        <NuxtLink class="doc-link" to="/document">Document</NuxtLink>
         <NuxtLink class="doc-link" to="/sessions">Sessions</NuxtLink>
         <button type="button" class="icon-button" title="New session" @click="createNewSession">N</button>
         <button type="button" class="icon-button" title="Save workflow" @click="saveWorkflow">S</button>

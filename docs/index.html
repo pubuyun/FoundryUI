@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FoundryUI Docs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify/lib/themes/dark.css" />
+  <style>
+    :root { --theme-color: #56d3b7; }
+    .markdown-section { max-width: 1080px; }
+    .type {
+      display: inline-block;
+      padding: 0.08rem 0.45rem;
+      border-radius: 999px;
+      color: #061014;
+      font-weight: 700;
+      font-size: 0.86em;
+      white-space: nowrap;
+    }
+    .ligand { background: #249a86; }
+    .protein { background: #4678d4; color: #f3f8ff; }
+    .residue { background: #9062ce; color: #f8f3ff; }
+    .atom { background: #e2559b; color: #fff7fb; }
+    .residue-atoms { background: #b36b2c; color: #fff6eb; }
+    .batch-protein { background: #2368ad; color: #f3f8ff; }
+    .batch-ligand { background: #168b69; color: #effff9; }
+    .complex { background: #c74b67; color: #fff7fa; }
+    .sequence { background: #a3b632; color: #111500; }
+    .score { background: #d28a19; color: #160e00; }
+    .node-card {
+      border-left: 4px solid #56d3b7;
+      padding: 0.8rem 1rem;
+      background: rgba(255,255,255,0.045);
+      margin: 1rem 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">Loading FoundryUI documentation...</div>
+  <script>
+    window.$docsify = {
+      name: 'FoundryUI',
+      repo: '',
+      loadSidebar: true,
+      subMaxLevel: 3,
+      auto2top: true,
+      search: 'auto'
+    };
+  </script>
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/docsify.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/search.min.js"></script>
+</body>
+</html>

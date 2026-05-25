@@ -203,7 +203,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
     ),
     "RosettaFold": NodeSpec(
         "RosettaFold",
-        inputs=_ports([PortSpec("sequences", "Batch Sequence"), PortSpec("ligand", "Ligand", optional=True)]),
+        inputs=_ports([PortSpec("sequences", "Batch Sequence"), PortSpec("ligand", "Batch Ligand", optional=True)]),
         options=_options(
             [
                 OptionSpec("earlyStoppingPlddtThreshold", "float", 0.5, min_value=0, max_value=1),
@@ -217,7 +217,7 @@ NODE_CATALOG: dict[str, NodeSpec] = {
     ),
     "RosettaFold3": NodeSpec(
         "RosettaFold3",
-        inputs=_ports([PortSpec("sequences", "Batch Sequence"), PortSpec("ligand", "Ligand", optional=True)]),
+        inputs=_ports([PortSpec("sequences", "Batch Sequence"), PortSpec("ligand", "Batch Ligand", optional=True)]),
         options=_options(
             [
                 OptionSpec("earlyStoppingPlddtThreshold", "float", 0.5, min_value=0, max_value=1),

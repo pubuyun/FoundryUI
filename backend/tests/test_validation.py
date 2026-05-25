@@ -61,6 +61,7 @@ def test_validate_allows_batch_structure_connection() -> None:
 
 def test_validate_allows_flexible_complex_to_strict_complex_connection() -> None:
     assert is_assignable("Batch Protein (With Ligand)", "Batch Protein with Ligand")
+    assert is_assignable("Ligand", "Batch Ligand")
 
 
 def test_validate_allows_blank_filter_by_score_metric_until_runtime() -> None:

@@ -28,6 +28,8 @@ def is_assignable(source: str, target: str) -> bool:
         return True
     if target == "Ligand" and source == "Ligand":
         return True
+    if target == "Batch Ligand" and source == "Ligand":
+        return True
     if target == "Batch Protein (With Ligand)" and source in {"Ligand", "Batch Ligand", "Protein"}:
         return True
     return False

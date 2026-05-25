@@ -524,6 +524,52 @@ def test_rosetta_fold_cofold_reuses_single_ligand_for_each_job(monkeypatch) -> N
     asyncio.run(execute())
 
 
+def test_rosetta_fold_cofold_reuses_multiple_single_ligand_inputs(monkeypatch) -> None:
+    async def execute() -> None:
+        run_id = "run_test_rf3_cofold_multiple_single_ligands"
+        artifact_store.init_run(run_id)
+        await run_registry.create(run_id, total_nodes=1)
+        ctx = ExecutionContext(run_id=run_id, store=artifact_store, registry=run_registry, uploads={})
+        root = artifact_store.node_dir(run_id, "source", "Test")
+        output_a = root / "rf3_output_a.pdb"
+        output_b = root / "rf3_output_b.pdb"
+        output_a.write_text(PDB)
+        output_b.write_text(PDB_CHAIN_B)
+        ligand_a = TypedPayload(type_name="Ligand", item_count=1, data=LIGAND_ABC, metadata={"smiles": "C"})
+        ligand_b = TypedPayload(type_name="Ligand", item_count=1, data=LIGAND_DEF, metadata={"smiles": "CC"})
+        captured: dict[str, object] = {}
+
+        async def fake_run_rf3_fold(**kwargs):
+            captured.update(kwargs)
+            return [output_a, output_b], [{"pLDDT": 0.9, "length": 3}, {"pLDDT": 0.8, "length": 3}]
+
+        monkeypatch.setattr(folding_module, "run_rf3_fold", fake_run_rf3_fold)
+        await rosetta_fold(
+            ctx,
+            WorkflowNode(id="rf3", type="RosettaFold", options={"inputMode": "Co-folding"}),
+            {
+                "sequences": TypedPayload(
+                    type_name="Batch Sequence",
+                    item_count=2,
+                    data=[{"id": "a", "sequence": "AAA"}, {"id": "b", "sequence": "BBB"}],
+                ),
+                "ligand": TypedPayload(
+                    type_name="Ligand",
+                    item_count=2,
+                    data=[LIGAND_ABC, LIGAND_DEF],
+                    metadata={"combined_payloads": [ligand_a.model_dump(), ligand_b.model_dump()]},
+                ),
+            },
+        )
+
+        assert captured["cofold_jobs"] == [
+            [{"seq": "AAA", "chain_id": "A"}, {"smiles": "C"}, {"smiles": "CC"}],
+            [{"seq": "BBB", "chain_id": "A"}, {"smiles": "C"}, {"smiles": "CC"}],
+        ]
+
+    asyncio.run(execute())
+
+
 def test_rosetta_fold_cofold_pairs_multiple_sequence_inputs(monkeypatch) -> None:
     async def execute() -> None:
         run_id = "run_test_rf3_cofold_parallel_sequences"
