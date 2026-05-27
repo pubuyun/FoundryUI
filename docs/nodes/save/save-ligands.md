@@ -2,14 +2,11 @@
 
 Saves ligand PDB files.
 
-Inputs:
-
+> [!input]
 - `(Batch) Ligand`: <span class="type ligand">Ligand</span> or <span class="type batch-ligand">Batch Ligand</span>.
 
-Options:
-
+> [!options]
 - `Folder Selector`: run-relative save folder.
 
-Output:
-
+> [!output]
 - Ligand PDB files.

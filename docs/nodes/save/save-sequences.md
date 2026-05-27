@@ -2,14 +2,11 @@
 
 Saves sequence outputs as FASTA.
 
-Inputs:
-
+> [!input]
 - `Batch Sequence`: <span class="type sequence">Batch Sequence</span>.
 
-Options:
-
+> [!options]
 - `Folder Selector`: run-relative save folder.
 
-Output:
-
+> [!output]
 - FASTA files.

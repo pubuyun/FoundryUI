@@ -2,10 +2,8 @@
 
 Creates <span class="type sequence">Batch Sequence</span> from FASTA uploads.
 
-Options:
-
+> [!options]
 - `Upload File`: `.fasta` or `.fa`.
 
-Output:
-
+> [!output]
 - `batchSequence`: parsed FASTA records with sequence IDs and sequences.

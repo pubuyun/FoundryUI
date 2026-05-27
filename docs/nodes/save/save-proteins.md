@@ -2,14 +2,11 @@
 
 Saves structure PDB files.
 
-Inputs:
-
+> [!input]
 - `Batch Protein (With Ligand)`: <span class="type complex">Batch Protein (With Ligand)</span>.
 
-Options:
-
+> [!options]
 - `Folder Selector`: run-relative save folder.
 
-Output:
-
+> [!output]
 - Saved PDB artifacts and archive entries.

@@ -2,15 +2,12 @@
 
 Manual filter that keeps selected protein chains.
 
-Inputs:
-
+> [!input]
 - `Batch Protein`: <span class="type batch-protein">Batch Protein</span>.
 
-Options:
-
+> [!options]
 - `Chains`: comma-separated chain IDs such as `A,B`.
 - `Open`: runtime viewer.
 
-Output:
-
+> [!output]
 - `batchProtein`: filtered <span class="type batch-protein">Batch Protein</span>.

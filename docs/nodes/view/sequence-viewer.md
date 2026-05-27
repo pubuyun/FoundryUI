@@ -2,14 +2,11 @@
 
 Terminal viewer node for sequences.
 
-Inputs:
-
+> [!input]
 - `Batch Sequence`: <span class="type sequence">Batch Sequence</span>.
 
-Options:
-
+> [!options]
 - `File Selector`: sequence file name or selector text.
 
-Output:
-
+> [!output]
 - No data-transforming output.

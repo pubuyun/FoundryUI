@@ -12,7 +12,6 @@ import {
   TextareaInputInterface,
   TextInputInterface,
   defineNode,
-  setNodePosition,
   useBaklava,
 } from "baklavajs";
 import { BaklavaInterfaceTypes, NodeInterfaceType, getType, setType } from "@baklavajs/interface-types";
@@ -120,6 +119,7 @@ const registeredConstructors = new Map<string, ReturnType<typeof defineNode>>();
 const typeRegistry = new Map<PortType, NodeInterfaceType<any>>();
 const uploadedByNode = reactive<Record<string, UploadedStructure[]>>({});
 const DEFAULT_API_BASE = "http://127.0.0.1:3000/api";
+const DEFAULT_WORKFLOW_PRESET = "ligand-binder-denovo.fuiworkflow";
 const apiBase = ref(DEFAULT_API_BASE);
 const apiStatus = ref<"idle" | "checking" | "available" | "unavailable">("idle");
 const apiMessage = ref("Enter API URL");
@@ -145,9 +145,11 @@ const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : ru
 const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
 const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
 const viewerEl = ref<HTMLElement | null>(null);
+const logsEl = ref<HTMLElement | null>(null);
 const workflowFileInput = ref<HTMLInputElement | null>(null);
 const viewerRuntimeFiles = ref<UploadedStructure[]>([]);
 const pendingRunInput = ref<PendingRunInput | null>(null);
+const logsFollowBottom = ref(true);
 const viewerModal = reactive<ViewerModal>({
   open: false,
   nodeId: "",
@@ -357,27 +359,6 @@ function registerNodes() {
     registeredConstructors.set(spec.type, nodeConstructor);
     baklava.editor.registerNodeType(nodeConstructor, { category: spec.category, title: spec.title });
   });
-}
-
-function addNode(type: string, x: number, y: number) {
-  const Constructor = registeredConstructors.get(type);
-  if (!Constructor) return;
-  const node = new Constructor();
-  node.position = { x: 0, y: 0 };
-  setNodePosition(node, x, y);
-  baklava.editor.graph.addNode(node);
-}
-
-function seedExampleWorkflow() {
-  [
-    ["LigandInput", -780, -190],
-    ["AtomSelector", -470, -190],
-    ["RFDiffusionSMbinder", -120, -180],
-    ["LigandMPNN", 260, -180],
-    ["RosettaFold", 610, -170],
-    ["FilterByScore", 930, -170],
-    ["PDBViewer", 1260, -170],
-  ].forEach(([type, x, y]) => addNode(String(type), Number(x), Number(y)));
 }
 
 function portColor(typeName: string | undefined) {
@@ -597,22 +578,25 @@ function submitViewerSelection() {
 }
 
 async function submitRuntimeInput() {
-  if (!pendingRunInput.value) return;
+  const input = pendingRunInput.value;
+  if (!input) return;
   const values: Record<string, string> = {};
-  pendingRunInput.value.fields.forEach((field) => {
-    const node = baklava.editor.graph.findNodeById(pendingRunInput.value!.nodeId);
+  input.fields.forEach((field) => {
+    const node = baklava.editor.graph.findNodeById(input.nodeId);
     values[field] = String(node?.inputs[field]?.value ?? "");
   });
-  manualSelections[pendingRunInput.value.nodeId] = { ...manualSelections[pendingRunInput.value.nodeId], ...values };
-  await postJson(`/api/runs/${pendingRunInput.value.runId}/input`, {
-    node_id: pendingRunInput.value.nodeId,
+  manualSelections[input.nodeId] = { ...manualSelections[input.nodeId], ...values };
+  await postJson(`/api/runs/${input.runId}/input`, {
+    node_id: input.nodeId,
     values,
   });
   runMessage.value = "Input submitted";
-  setNodePendingInput(pendingRunInput.value.nodeId, false);
-  pendingRunInput.value = null;
+  setNodePendingInput(input.nodeId, false);
+  if (pendingRunInput.value?.nodeId === input.nodeId && pendingRunInput.value.sequence === input.sequence) {
+    pendingRunInput.value = null;
+    closeViewer();
+  }
   await saveSessionDocument();
-  closeViewer();
 }
 
 function specForNode(node: AbstractNode) {
@@ -766,14 +750,18 @@ function requestLoadWorkflow() {
 async function loadWorkflowPreset() {
   if (!selectedWorkflowPreset.value) return;
   try {
-    const response = await fetch(`/workflows/${selectedWorkflowPreset.value}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Could not load preset (${response.status})`);
-    loadWorkflowDocument(await response.json());
+    await loadWorkflowPresetFile(selectedWorkflowPreset.value);
     await saveSessionDocument();
     selectedWorkflowPreset.value = "";
   } catch (error) {
     window.alert(error instanceof Error ? error.message : "Could not load preset workflow.");
   }
+}
+
+async function loadWorkflowPresetFile(file: string) {
+  const response = await fetch(`/workflows/${file}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not load preset (${response.status})`);
+  loadWorkflowDocument(await response.json());
 }
 
 async function loadWorkflow(event: Event) {
@@ -845,6 +833,7 @@ async function queueRun() {
 
 function resetRunUi() {
   runLogs.value = [];
+  logsFollowBottom.value = true;
   validationErrors.value = [];
   runStatus.value = null;
   pendingRunInput.value = null;
@@ -914,6 +903,7 @@ async function ensureSession() {
       runMessage.value = error instanceof Error ? error.message : "Could not load session";
     }
   }
+  await ensureDefaultWorkflowLoaded();
   const session = await postJson<SessionRecord>("/api/sessions", { document: workflowDocument() });
   currentSessionId.value = session.session_id;
   await router.replace({ query: { ...route.query, session: session.session_id } });
@@ -924,7 +914,7 @@ async function createNewSession() {
   const route = useRoute();
   const router = useRouter();
   clearWorkflow(false);
-  seedExampleWorkflow();
+  await loadDefaultWorkflow();
   const session = await postJson<SessionRecord>("/api/sessions", { document: workflowDocument() });
   currentSessionId.value = session.session_id;
   currentRunId.value = "";
@@ -937,6 +927,20 @@ async function createNewSession() {
   runState.value = "idle";
   runMessage.value = "New session created";
   await router.replace({ query: { ...route.query, session: session.session_id } });
+}
+
+async function loadDefaultWorkflow() {
+  try {
+    await loadWorkflowPresetFile(DEFAULT_WORKFLOW_PRESET);
+  } catch (error) {
+    clearWorkflow(false);
+    runMessage.value = error instanceof Error ? error.message : "Could not load default workflow";
+  }
+}
+
+async function ensureDefaultWorkflowLoaded() {
+  if (baklava.editor.graph.nodes.length) return;
+  await loadDefaultWorkflow();
 }
 
 async function saveSessionDocument() {
@@ -1125,6 +1129,22 @@ function archiveUrl() {
   return currentRunId.value ? apiUrl(`/api/runs/${currentRunId.value}/archive`) : "#";
 }
 
+function recentStderrLines() {
+  return runLogs.value.filter((line) => line.startsWith("stderr:")).slice(-4);
+}
+
+function onLogsScroll() {
+  const el = logsEl.value;
+  if (!el) return;
+  logsFollowBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+}
+
+function scrollLogsToBottom() {
+  const el = logsEl.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+}
+
 function markNodeError(nodeId: string) {
   const next = new Set(errorNodeIds.value);
   next.add(nodeId);
@@ -1243,7 +1263,8 @@ function connectedSourceOutput(node: AbstractNode) {
   return outputs.value.find((output) => output.node_id === source.id && output.output_key === interfaceKey(source, connection.from));
 }
 
-function nodeStructureOutput(node: AbstractNode) {
+function nodeStructureOutput(node: AbstractNode | undefined) {
+  if (!node) return undefined;
   return outputs.value.find((output) => {
     if (output.node_id !== node.id || !output.artifact_ids.length) return false;
     const typeName = String(output.type_name ?? "");
@@ -1254,7 +1275,11 @@ function nodeStructureOutput(node: AbstractNode) {
 async function loadViewerRuntimeFiles(nodeId: string) {
   const node = baklava.editor.graph.findNodeById(nodeId);
   if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter"].includes(String(node.type))) return;
-  const output = String(node.type) === "ChainFilter" ? nodeStructureOutput(node) ?? connectedSourceOutput(node) : connectedSourceOutput(node);
+  const output = String(node.type) === "ChainFilter" || String(node.type) === "PDBViewer"
+    ? nodeStructureOutput(node) ?? connectedSourceOutput(node)
+    : pendingRunInput.value?.nodeId === nodeId
+      ? connectedSourceOutput(node)
+      : undefined;
   if (!output?.artifact_ids.length) return;
   viewerRuntimeFiles.value = await runtimeFilesFromArtifactIds(output.artifact_ids, output.paths);
 }
@@ -1285,9 +1310,12 @@ function structuresForNodeId(nodeId: string, seen = new Set<string>()): Uploaded
   if (viewerRuntimeFiles.value.length) return viewerRuntimeFiles.value;
   if (seen.has(nodeId)) return [];
   seen.add(nodeId);
+  const node = baklava.editor.graph.findNodeById(nodeId);
+  if (node && ["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter"].includes(String(node.type))) {
+    return [];
+  }
   const ownFiles = uploadedByNode[nodeId];
   if (ownFiles?.length) return ownFiles;
-  const node = baklava.editor.graph.findNodeById(nodeId);
   const upstream = node ? connectedSourceNode(node) : undefined;
   if (upstream) {
     const upstreamFiles = structuresForNodeId(upstream.id, seen);
@@ -1383,9 +1411,12 @@ watch([() => viewerModal.fileIndex, () => viewerModal.style, () => viewerModal.o
   void nextTick(renderViewer);
 });
 
+watch(runLogs, () => {
+  if (logsFollowBottom.value) void nextTick(scrollLogsToBottom);
+}, { deep: true });
+
 registerTypes();
 registerNodes();
-seedExampleWorkflow();
 
 baklava.hooks.renderInterface.subscribe("foundry-colors", ({ intf, el }) => {
   const type = getType(intf);
@@ -1410,6 +1441,10 @@ baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
 onMounted(() => {
   restoreApiBase();
   void loadWorkflowPresets();
+  const route = useRoute();
+  if (!route.query.session) {
+    void ensureDefaultWorkflowLoaded();
+  }
   void nextTick(renderViewer);
   if (normalizedApiBase.value) {
     void connectApi();
@@ -1477,11 +1512,10 @@ onBeforeUnmount(() => {
       <section class="run-panel-section">
         <header>
           <h2>Status</h2>
-          <a v-if="currentRunId && runState === 'completed'" class="archive-link" :href="archiveUrl()" title="Download archive">
-            <span aria-hidden="true">↓</span>
-            Archive Download
+          <a v-if="currentRunId && (runState === 'completed' || runState === 'failed')" class="archive-link" :class="{ error: runState === 'failed' }" :href="archiveUrl()" title="Download archive">
+            <span class="download-icon" aria-hidden="true">⇩</span>
+            {{ runState === "failed" ? "ERROR" : "Archive Download" }}
           </a>
-          <span v-else-if="runState === 'failed'" class="error-label">ERROR</span>
           <span v-else-if="runState === 'stopped'" class="stopped-label">STOPPED</span>
         </header>
         <div class="progress-track">
@@ -1506,7 +1540,10 @@ onBeforeUnmount(() => {
             <p>{{ error.message ?? "Unknown error" }}</p>
           </li>
         </ul>
-        <p v-else>No issues</p>
+        <div v-if="recentStderrLines().length" class="stderr-preview">
+          <p v-for="(line, index) in recentStderrLines()" :key="`${line}-${index}`">{{ line }}</p>
+        </div>
+        <p v-else-if="!validationErrors.length">No issues</p>
       </section>
 
       <section class="run-panel-section">
@@ -1528,7 +1565,7 @@ onBeforeUnmount(() => {
           <h2>Logs</h2>
           <span>{{ runLogs.length }}</span>
         </header>
-        <pre>{{ runLogs.length ? runLogs.join("\n") : "No command output yet" }}</pre>
+        <pre ref="logsEl" class="terminal-log" @scroll="onLogsScroll">{{ runLogs.length ? runLogs.join("\n") : "No command output yet" }}</pre>
       </section>
     </aside>
 
@@ -1886,6 +1923,21 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
+.archive-link.error {
+  color: #ff9c9c;
+}
+
+.download-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+
 .error-label {
   color: #ff9c9c;
   font-size: 12px;
@@ -1923,12 +1975,36 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.logs-section pre {
-  min-height: 120px;
+.stderr-preview {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #2d3948;
+}
+
+.stderr-preview p {
   margin: 0;
-  white-space: pre-wrap;
-  color: #b8c5d4;
+  color: #ffb6b6;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
+
+.terminal-log {
+  min-height: 120px;
+  max-height: 150px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #273342;
+  border-radius: 6px;
+  background: #05080d;
+  white-space: pre-wrap;
+  color: #8ef0bd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: inset 0 0 0 1px rgba(126, 224, 196, 0.05);
 }
 
 .canvas-panel > div,
@@ -2030,7 +2106,8 @@ onBeforeUnmount(() => {
   content: "manual";
   position: absolute;
   top: 4px;
-  right: 8px;
+  right: 34px;
+  z-index: 1;
   color: #ffb86b;
   font-size: 10px;
   font-weight: 800;

@@ -2,15 +2,12 @@
 
 Manual node that emits <span class="type atom">List of Atoms</span>.
 
-Inputs:
-
+> [!input]
 - `Ligand*`: optional <span class="type ligand">Ligand</span>.
 
-Options:
-
+> [!options]
 - `Atoms`: comma-separated atom names such as `C1,O2,N1`.
 - `Open`: runtime viewer.
 
-Output:
-
+> [!output]
 - `atoms`: atom names as <span class="type atom">List of Atoms</span>.

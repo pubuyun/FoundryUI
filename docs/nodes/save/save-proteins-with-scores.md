@@ -2,15 +2,12 @@
 
 Saves structure PDB files and a score CSV.
 
-Inputs:
-
+> [!input]
 - `Batch Protein (With Ligand)`: <span class="type complex">Batch Protein (With Ligand)</span>.
 - `Score`: <span class="type score">Score</span>.
 
-Options:
-
+> [!options]
 - `Folder Selector`: run-relative save folder, default `outputs/proteins`.
 
-Output:
-
+> [!output]
 - Saved PDB files and CSV containing a `pdb_filename` column.
