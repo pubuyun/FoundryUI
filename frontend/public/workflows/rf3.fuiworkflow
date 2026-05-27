@@ -132,7 +132,7 @@
           "inputs": {
             "file": {
               "id": "bc869175-8346-48da-b2fc-eb01dd63051e",
-              "value": "lcg3m3sh.pdb"
+              "value": ""
             },
             "viewer": {
               "id": "bb0a9cc0-4c35-4939-8a6e-17d82923cb95",
@@ -303,7 +303,7 @@
         },
         "inputs": {},
         "options": {
-          "file": "lcg3m3sh.pdb",
+          "file": "",
           "viewer": "Open"
         },
         "outputs": {
@@ -378,13 +378,7 @@
     ]
   },
   "uploads": {
-    "4243c292-bec7-41f8-a215-e464e441e18c": [
-      {
-        "name": "lcg3m3shrfd.pdb",
-        "type": "pdb",
-        "content": "HETATM    1  S   LIG Z   0      -1.211  -0.454  -1.266  1.00 0.00           S\nHETATM    2  O1  LIG Z   0      -0.649   3.293   0.952  1.00 0.00           O\nHETATM    3  O2  LIG Z   0       2.389  -1.389  -1.710  1.00 0.00           O\nHETATM    4  O3  LIG Z   0       4.565  -0.564   0.995  1.00 0.00           O\nHETATM    5  O4  LIG Z   0       5.519   1.284   0.089  1.00 0.00           O\nHETATM    6  N1  LIG Z   0       1.265  -2.497   1.220  1.00 0.00           N\nHETATM    7  N2  LIG Z   0       2.152  -0.025   0.152  1.00 0.00           N\nHETATM    8  C1  LIG Z   0      -2.665   0.389  -0.497  1.00 0.00           C\nHETATM    9  C2  LIG Z   0      -3.602  -0.667   0.143  1.00 0.00           C\nHETATM   10  C3  LIG Z   0      -2.102   1.420   0.510  1.00 0.00           C\nHETATM   11  C4  LIG Z   0      -3.415   1.096  -1.640  1.00 0.00           C\nHETATM   12  C5  LIG Z   0      -5.051  -0.225   0.389  1.00 0.00           C\nHETATM   13  C6  LIG Z   0      -0.539  -1.174   0.243  1.00 0.00           C\nHETATM   14  C7  LIG Z   0      -1.080   2.399  -0.068  1.00 0.00           C\nHETATM   15  C8  LIG Z   0       0.732  -1.979  -0.042  1.00 0.00           C\nHETATM   16  C9  LIG Z   0      -5.843  -1.312   1.103  1.00 0.00           C\nHETATM   17  C10 LIG Z   0       1.849  -1.125  -0.637  1.00 0.00           C\nHETATM   18  C11 LIG Z   0       3.157   0.941  -0.224  1.00 0.00           C\nHETATM   19  C12 LIG Z   0       4.530   0.590   0.290  1.00 0.00           C\nCONECT    1    8   13\nCONECT    2   14\nCONECT    3   17   17\nCONECT    4   19\nCONECT    5   19   19\nCONECT    6   15\nCONECT    7   17   18\nCONECT    8    1    9   10   11\nCONECT    9    8   12\nCONECT   10    8   14\nCONECT   11    8\nCONECT   12    9   16\nCONECT   13    1   15\nCONECT   14    2   10\nCONECT   15    6   13   17\nCONECT   16   12\nCONECT   17    3    3    7   15\nCONECT   18    7   19\nCONECT   19    4    5    5   18\nEND"
-      }
-    ],
+    "4243c292-bec7-41f8-a215-e464e441e18c": [],
     "b53db392-6cee-4703-b19e-86193bad12ab": [
       {
         "name": "rcsb_pdb_6QP2.fasta",
@@ -425,12 +419,6 @@
         "content": ">cg3m3sh_lcg3m3sh_15_model_0.cif_d3_model|A\r\nPRALVVIDVGSAGGLAAGLATLDALRAAGIEVVHVVNVGGSGEYGTQMAARAAALGVPVTTVASLDPAEAADVTLAAVLEAQPDLIAIAVDAAGGDGPARFLRLLAEKLAAAGLRPPVLVIATGVSTPAVADALRAAVAHAEALGHTVALRLFDGEPDPAEVRAAVRAFLRAQGLIP\r\n>cg3m3sh_lcg3m3sh_27_model_0.cif_d0_model|A\r\nAAAALAGKTILVIGAGRLDSGGARVARTLARAAPTARLVLMDISAANVDAVVAALRAEGADVTGVTVPSLADFPAVLQEAIDKYKPDVVVSVPLADDVGIAAGVAACALCRARGIPCVAVVIDPDPARQAAAAAQLLAAGAVAVLHAPFTDEELLAAVAAAVRAGRA"
       }
     ],
-    "50968668-2bb8-457b-a294-63c37117c2a8": [
-      {
-        "name": "lcg3m3sh.pdb",
-        "type": "pdb",
-        "content": "TITLE     lcg3m3sh\nREMARK   4      COMPLIES WITH FORMAT V. 3.0, 1-DEC-2006\nREMARK 888\nREMARK 888 WRITTEN BY MAESTRO (A PRODUCT OF SCHRODINGER, LLC)\nHETATM    1  S   L:0 Z   0      -1.203  -0.399  -1.244  1.00  1.00           S  \nHETATM    2  O1  L:0 Z   0      -0.641   3.348   0.974  1.00  1.00           O  \nHETATM    3  O2  L:0 Z   0       2.397  -1.334  -1.688  1.00  1.00           O  \nHETATM    4  O3  L:0 Z   0       4.585  -0.534   0.972  1.00  1.00           O1-\nHETATM    5  O4  L:0 Z   0       5.539   1.314   0.066  1.00  1.00           O  \nHETATM    6  N1  L:0 Z   0       1.279  -2.447   1.256  1.00  1.00           N1+\nHETATM    7  N2  L:0 Z   0       2.146  -0.019   0.138  1.00  1.00           N  \nHETATM    8  C1  L:0 Z   0      -2.657   0.444  -0.475  1.00  1.00           C  \nHETATM    9  C2  L:0 Z   0      -3.594  -0.612   0.165  1.00  1.00           C  \nHETATM   10  C3  L:0 Z   0      -2.094   1.475   0.532  1.00  1.00           C  \nHETATM   11  C4  L:0 Z   0      -3.407   1.151  -1.618  1.00  1.00           C  \nHETATM   12  C5  L:0 Z   0      -5.043  -0.170   0.411  1.00  1.00           C  \nHETATM   13  C6  L:0 Z   0      -0.531  -1.119   0.265  1.00  1.00           C  \nHETATM   14  C7  L:0 Z   0      -1.072   2.454  -0.046  1.00  1.00           C  \nHETATM   15  C8  L:0 Z   0       0.740  -1.924  -0.020  1.00  1.00           C  \nHETATM   16  C9  L:0 Z   0      -5.835  -1.257   1.125  1.00  1.00           C  \nHETATM   17  C10 L:0 Z   0       1.857  -1.070  -0.615  1.00  1.00           C  \nHETATM   18  C11 L:0 Z   0       3.177   0.971  -0.247  1.00  1.00           C  \nHETATM   19  C12 L:0 Z   0       4.550   0.620   0.267  1.00  1.00           C  \nHETATM   20  HO1 L:0 Z   0       0.001   3.963   0.611  1.00  1.00           H  \nHETATM   21 H1_1 L:0 Z   0       2.118  -2.979   1.074  1.00  1.00           H  \nHETATM   22 H1_2 L:0 Z   0       1.496  -1.677   1.871  1.00  1.00           H  \nHETATM   23  HN2 L:0 Z   0       1.657   0.127   1.010  1.00  1.00           H  \nHETATM   24 H2_1 L:0 Z   0      -3.159  -0.956   1.103  1.00  1.00           H  \nHETATM   25 H2_2 L:0 Z   0      -3.592  -1.513  -0.448  1.00  1.00           H  \nHETATM   26 H3_1 L:0 Z   0      -1.651   0.949   1.377  1.00  1.00           H  \nHETATM   27 H3_2 L:0 Z   0      -2.918   2.034   0.975  1.00  1.00           H  \nHETATM   28 H4_1 L:0 Z   0      -4.279   1.667  -1.216  1.00  1.00           H  \nHETATM   29 H4_2 L:0 Z   0      -2.745   1.874  -2.095  1.00  1.00           H  \nHETATM   30 H4_3 L:0 Z   0      -3.729   0.414  -2.353  1.00  1.00           H  \nHETATM   31 H5_1 L:0 Z   0      -5.519   0.059  -0.542  1.00  1.00           H  \nHETATM   32 H5_2 L:0 Z   0      -5.048   0.738   1.014  1.00  1.00           H  \nHETATM   33 H6_1 L:0 Z   0      -1.278  -1.769   0.721  1.00  1.00           H  \nHETATM   34 H6_2 L:0 Z   0      -0.305  -0.325   0.977  1.00  1.00           H  \nHETATM   35 H7_1 L:0 Z   0      -0.215   1.900  -0.429  1.00  1.00           H  \nHETATM   36 H7_2 L:0 Z   0      -1.530   3.022  -0.856  1.00  1.00           H  \nHETATM   37  HC8 L:0 Z   0       0.510  -2.751  -0.691  1.00  1.00           H  \nHETATM   38 H9_1 L:0 Z   0      -6.858  -0.916   1.286  1.00  1.00           H  \nHETATM   39 H9_2 L:0 Z   0      -5.846  -2.160   0.515  1.00  1.00           H  \nHETATM   40 H9_3 L:0 Z   0      -5.370  -1.474   2.087  1.00  1.00           H  \nHETATM   41 H111 L:0 Z   0       2.891   1.955   0.126  1.00  1.00           H  \nHETATM   42 H112 L:0 Z   0       3.208   1.057  -1.333  1.00  1.00           H  \nHETATM   43  HN1 L:0 Z   0       0.590  -3.043   1.692  1.00  1.00           H  \nCONECT    1    8   13\nCONECT    2   14   20\nCONECT    3   17\nCONECT    3   17\nCONECT    4   19\nCONECT    5   19\nCONECT    5   19\nCONECT    6   15   21   22   43\nCONECT    7   17   18   23\nCONECT    8    1    9   10   11\nCONECT    9    8   12   24   25\nCONECT   10    8   14   26   27\nCONECT   11    8   28   29   30\nCONECT   12    9   16   31   32\nCONECT   13    1   15   33   34\nCONECT   14    2   10   35   36\nCONECT   15    6   13   17   37\nCONECT   16   12   38   39   40\nCONECT   17    3    7   15\nCONECT   17    3\nCONECT   18    7   19   41   42\nCONECT   19    4    5   18\nCONECT   19    5\nCONECT   20    2\nCONECT   21    6\nCONECT   22    6\nCONECT   23    7\nCONECT   24    9\nCONECT   25    9\nCONECT   26   10\nCONECT   27   10\nCONECT   28   11\nCONECT   29   11\nCONECT   30   11\nCONECT   31   12\nCONECT   32   12\nCONECT   33   13\nCONECT   34   13\nCONECT   35   14\nCONECT   36   14\nCONECT   37   15\nCONECT   38   16\nCONECT   39   16\nCONECT   40   16\nCONECT   41   18\nCONECT   42   18\nCONECT   43    6\nEND   \n"
-      }
-    ]
+    "50968668-2bb8-457b-a294-63c37117c2a8": []
   }
 }

@@ -379,7 +379,10 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score", optional: true },
     ],
-    options: [{ key: "chiralityTargets", label: "Atom chirality targets", kind: "textarea", value: "" }],
+    options: [
+      { key: "chiralityTargets", label: "Atom chirality targets", kind: "textarea", value: "" },
+      { key: "viewer", label: "3D Selector", kind: "viewer", value: "Open", viewerMode: "atom" },
+    ],
     outputs: [
       { key: "complexes", label: "Batch Protein (With Ligand)", type: "Batch Protein (With Ligand)" },
       { key: "score", label: "Score", type: "Score" },

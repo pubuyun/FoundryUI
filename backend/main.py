@@ -58,6 +58,10 @@ def _ensure_worker() -> None:
         _worker_task = asyncio.create_task(_worker_loop())
 
 
+def _executable_node_count(graph: WorkflowGraph) -> int:
+    return sum(1 for node in graph.nodes if node.type != "MDNote")
+
+
 async def _worker_loop() -> None:
     while True:
         queued = await run_queue.get()
@@ -129,7 +133,7 @@ async def create_run(request: RunCreateRequest) -> dict[str, Any]:
         request = request.model_copy(update={"previous_run_id": previous_run_id})
     run_id = f"run_{uuid.uuid4().hex}"
     artifact_store.init_run(run_id)
-    await run_registry.create(run_id, total_nodes=len(graph.nodes), request=request)
+    await run_registry.create(run_id, total_nodes=_executable_node_count(graph), request=request)
     if request.session_id:
         session_store.update(request.session_id, latest_run_id=run_id, document=request.document.model_dump(mode="json") if request.document else None)
     _ensure_worker()

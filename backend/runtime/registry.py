@@ -112,7 +112,8 @@ class RunRegistry:
         if node_id in record.completed_node_ids:
             return
         record.completed_node_ids.add(node_id)
-        record.completed_nodes += 1
+        if node_type != "MDNote":
+            record.completed_nodes += 1
         await self.publish(
             RunEvent(
                 event="node_completed",

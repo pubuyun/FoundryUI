@@ -540,13 +540,7 @@
     ]
   },
   "uploads": {
-    "4243c292-bec7-41f8-a215-e464e441e18c": [
-      {
-        "name": "lcg3m3shrfd.pdb",
-        "type": "pdb",
-        "content": "HETATM    1  S   LIG Z   0      -1.211  -0.454  -1.266  1.00 0.00           S\nHETATM    2  O1  LIG Z   0      -0.649   3.293   0.952  1.00 0.00           O\nHETATM    3  O2  LIG Z   0       2.389  -1.389  -1.710  1.00 0.00           O\nHETATM    4  O3  LIG Z   0       4.565  -0.564   0.995  1.00 0.00           O\nHETATM    5  O4  LIG Z   0       5.519   1.284   0.089  1.00 0.00           O\nHETATM    6  N1  LIG Z   0       1.265  -2.497   1.220  1.00 0.00           N\nHETATM    7  N2  LIG Z   0       2.152  -0.025   0.152  1.00 0.00           N\nHETATM    8  C1  LIG Z   0      -2.665   0.389  -0.497  1.00 0.00           C\nHETATM    9  C2  LIG Z   0      -3.602  -0.667   0.143  1.00 0.00           C\nHETATM   10  C3  LIG Z   0      -2.102   1.420   0.510  1.00 0.00           C\nHETATM   11  C4  LIG Z   0      -3.415   1.096  -1.640  1.00 0.00           C\nHETATM   12  C5  LIG Z   0      -5.051  -0.225   0.389  1.00 0.00           C\nHETATM   13  C6  LIG Z   0      -0.539  -1.174   0.243  1.00 0.00           C\nHETATM   14  C7  LIG Z   0      -1.080   2.399  -0.068  1.00 0.00           C\nHETATM   15  C8  LIG Z   0       0.732  -1.979  -0.042  1.00 0.00           C\nHETATM   16  C9  LIG Z   0      -5.843  -1.312   1.103  1.00 0.00           C\nHETATM   17  C10 LIG Z   0       1.849  -1.125  -0.637  1.00 0.00           C\nHETATM   18  C11 LIG Z   0       3.157   0.941  -0.224  1.00 0.00           C\nHETATM   19  C12 LIG Z   0       4.530   0.590   0.290  1.00 0.00           C\nCONECT    1    8   13\nCONECT    2   14\nCONECT    3   17   17\nCONECT    4   19\nCONECT    5   19   19\nCONECT    6   15\nCONECT    7   17   18\nCONECT    8    1    9   10   11\nCONECT    9    8   12\nCONECT   10    8   14\nCONECT   11    8\nCONECT   12    9   16\nCONECT   13    1   15\nCONECT   14    2   10\nCONECT   15    6   13   17\nCONECT   16   12\nCONECT   17    3    3    7   15\nCONECT   18    7   19\nCONECT   19    4    5    5   18\nEND"
-      }
-    ],
+    "4243c292-bec7-41f8-a215-e464e441e18c": [],
     "b53db392-6cee-4703-b19e-86193bad12ab": [
       {
         "name": "rcsb_pdb_6QP2.fasta",

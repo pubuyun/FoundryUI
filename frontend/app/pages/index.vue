@@ -1129,10 +1129,6 @@ function archiveUrl() {
   return currentRunId.value ? apiUrl(`/api/runs/${currentRunId.value}/archive`) : "#";
 }
 
-function recentStderrLines() {
-  return runLogs.value.filter((line) => line.startsWith("stderr:")).slice(-4);
-}
-
 function onLogsScroll() {
   const el = logsEl.value;
   if (!el) return;
@@ -1260,7 +1256,9 @@ function connectedSourceOutput(node: AbstractNode) {
   if (!connection) return undefined;
   const source = baklava.editor.graph.findNodeById(connection.from.nodeId);
   if (!source) return undefined;
-  return outputs.value.find((output) => output.node_id === source.id && output.output_key === interfaceKey(source, connection.from));
+  const outputKey = interfaceKey(source, connection.from);
+  return outputs.value.find((output) => output.node_id === source.id && output.output_key === outputKey)
+    ?? outputs.value.find((output) => output.node_id === source.id && output.artifact_ids.length && String(output.type_name ?? "").includes("Protein"));
 }
 
 function nodeStructureOutput(node: AbstractNode | undefined) {
@@ -1540,9 +1538,6 @@ onBeforeUnmount(() => {
             <p>{{ error.message ?? "Unknown error" }}</p>
           </li>
         </ul>
-        <div v-if="recentStderrLines().length" class="stderr-preview">
-          <p v-for="(line, index) in recentStderrLines()" :key="`${line}-${index}`">{{ line }}</p>
-        </div>
         <p v-else-if="!validationErrors.length">No issues</p>
       </section>
 
@@ -1973,21 +1968,6 @@ onBeforeUnmount(() => {
 .artifact-list span {
   color: #91a0b2;
   font-size: 11px;
-}
-
-.stderr-preview {
-  display: grid;
-  gap: 4px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #2d3948;
-}
-
-.stderr-preview p {
-  margin: 0;
-  color: #ffb6b6;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  white-space: pre-wrap;
 }
 
 .terminal-log {

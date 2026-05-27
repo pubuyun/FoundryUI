@@ -37,10 +37,9 @@ async def run_command_streaming(
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
-        last_stderr = ""
+        recent_stderr: list[str] = []
 
         async def pump(stream: asyncio.StreamReader | None, event_name: str, handle) -> None:
-            nonlocal last_stderr
             if stream is None:
                 return
             while True:
@@ -51,7 +50,8 @@ async def run_command_streaming(
                 handle.write(text + "\n")
                 handle.flush()
                 if event_name == "stderr" and text:
-                    last_stderr = text
+                    recent_stderr.append(text)
+                    del recent_stderr[:-4]
                 await registry.publish(RunEvent(event=event_name, run_id=run_id, node_id=node_id, node_type=node_type, message=text))
 
         pump_tasks = [asyncio.create_task(pump(process.stdout, "stdout", stdout_handle)), asyncio.create_task(pump(process.stderr, "stderr", stderr_handle))]
@@ -80,8 +80,8 @@ async def run_command_streaming(
 
         if return_code != 0:
             message = f"Command failed with exit code {return_code}."
-            if last_stderr:
-                message = f"{message} Last stderr: {last_stderr}"
+            if recent_stderr:
+                message = f"{message} Last stderr:\n" + "\n".join(recent_stderr)
             raise BackendError(
                 make_error(
                     "SUBPROCESS_FAILED",
