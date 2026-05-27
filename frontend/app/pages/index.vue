@@ -1699,7 +1699,7 @@ onBeforeUnmount(() => {
                 <p>{{ error.message ?? "Unknown error" }}</p>
                 <small v-if="formatErrorDetails(error)">{{ formatErrorDetails(error) }}</small>
               </li>
-            </ul>
+            </ul> 
             <p v-else>No issues</p>
           </div>
         </section>
@@ -2084,7 +2084,6 @@ onBeforeUnmount(() => {
 .sidebar-tab {
   width: 34px;
   height: 42px;
-  display: grid;
   place-items: center;
   align-content: center;
   gap: 1px;
@@ -2319,8 +2318,11 @@ onBeforeUnmount(() => {
 }
 
 .baklava-toolbar {
-  left: auto !important;
-  right: 12px !important;
+  flex-direction: row-reverse !important;
+}
+
+.baklava-minimap {
+  margin-top: 60px !important;
 }
 
 .baklava-context-menu {
@@ -2698,7 +2700,7 @@ onBeforeUnmount(() => {
   }
 
   .sidebar-tab {
-    width: 32px;
+    width: 64px;
     height: 42px;
   }
 
