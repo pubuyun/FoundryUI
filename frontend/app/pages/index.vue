@@ -1137,6 +1137,30 @@ function readBackendMessage(payload: any, fallback: string) {
   return fallback || "Backend request failed";
 }
 
+function formatErrorDetails(error: Record<string, any>) {
+  const details = error.details;
+  if (!details || typeof details !== "object") return "";
+  const parts: string[] = [];
+  const detailFields: Array<[string, string]> = [
+    ["missing_atoms", "Missing atoms"],
+    ["missing_residues", "Missing residues"],
+    ["missing_chains", "Missing chains"],
+    ["missing_entries", "Missing entries"],
+    ["invalid_entries", "Invalid entries"],
+  ];
+  detailFields.forEach(([key, label]) => {
+    const value = details[key];
+    if (Array.isArray(value) && value.length) parts.push(`${label}: ${value.join(", ")}`);
+  });
+  if (details.missing_atoms && !Array.isArray(details.missing_atoms) && typeof details.missing_atoms === "object") {
+    const value = Object.entries(details.missing_atoms)
+      .map(([residue, atoms]) => `${residue}: ${Array.isArray(atoms) ? atoms.join(", ") : String(atoms)}`)
+      .join("; ");
+    if (value) parts.push(`Missing atoms: ${value}`);
+  }
+  return parts.join(" | ");
+}
+
 function artifactUrl(artifact: BackendArtifact) {
   return apiUrl(`/api/artifacts/${artifact.artifact_id}`);
 }
@@ -1597,6 +1621,7 @@ onBeforeUnmount(() => {
             <strong>{{ error.code ?? "ERROR" }}</strong>
             <span>{{ error.node_type || error.node_id ? `${error.node_type ?? "node"} ${error.node_id ?? ""}` : "" }}</span>
             <p>{{ error.message ?? "Unknown error" }}</p>
+            <small v-if="formatErrorDetails(error)">{{ formatErrorDetails(error) }}</small>
           </li>
         </ul>
         <p v-else-if="!validationErrors.length">No issues</p>
@@ -2029,6 +2054,12 @@ onBeforeUnmount(() => {
 .artifact-list span {
   color: #91a0b2;
   font-size: 11px;
+}
+
+.issue-list small {
+  color: #ffd7a8;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .terminal-log {

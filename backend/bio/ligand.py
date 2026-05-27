@@ -105,6 +105,23 @@ def ligand_has_atom_chirality_targets(ligand_pdb: str, targets: list[tuple[str, 
     return all(chirality.get(atom_name) == expected for atom_name, expected in targets)
 
 
+def validate_ligand_atom_chirality_targets(ligand_pdb: str, targets: list[tuple[str, str]]) -> None:
+    if not targets:
+        return
+    mol = _mol_from_pdb(ligand_pdb)
+    if mol is None:
+        raise ValueError("Ligand PDB is not parseable by RDKit.")
+    _assign_3d_stereochemistry(mol)
+    atom_names = _atom_names(mol)
+    chirality = _chirality_by_atom_name(mol)
+    missing = [atom_name for atom_name, _ in targets if atom_name not in atom_names]
+    if missing:
+        raise ValueError(f"Selected atom(s) are not present in the ligand: {', '.join(missing)}.")
+    achiral = [atom_name for atom_name, _ in targets if atom_name not in chirality]
+    if achiral:
+        raise ValueError(f"Selected atom(s) have no assigned R/S chirality: {', '.join(achiral)}.")
+
+
 def _mol_from_pdb(content: str):
     if Chem is None:
         raise ValueError("RDKit is required to compare ligand structures.")
@@ -152,6 +169,18 @@ def _chirality_by_atom_name(mol) -> dict[str, str]:
         if atom_name and atom.HasProp("_CIPCode"):
             labels[atom_name] = atom.GetProp("_CIPCode")
     return labels
+
+
+def _atom_names(mol) -> set[str]:
+    names: set[str] = set()
+    for atom in mol.GetAtoms():
+        info = atom.GetPDBResidueInfo()
+        if info is None:
+            continue
+        atom_name = info.GetName().strip()
+        if atom_name:
+            names.add(atom_name)
+    return names
 
 
 def _standard_atom_names(mol, atom_lines: list[str]) -> list[str]:

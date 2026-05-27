@@ -76,6 +76,40 @@ def list_chain_ids(content: str) -> list[str]:
     return chains
 
 
+def list_atom_names(content: str) -> list[str]:
+    atoms: list[str] = []
+    for line in content.splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        atom = line[12:16].strip() if len(line) >= 16 else ""
+        if atom and atom not in atoms:
+            atoms.append(atom)
+    return atoms
+
+
+def list_residue_ids(content: str) -> list[str]:
+    residues: list[str] = []
+    for line in content.splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        residue = residue_selector_id(line)
+        if residue and residue not in residues:
+            residues.append(residue)
+    return residues
+
+
+def residue_atom_map(content: str) -> dict[str, set[str]]:
+    residues: dict[str, set[str]] = {}
+    for line in content.splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        residue = residue_selector_id(line)
+        atom = line[12:16].strip() if len(line) >= 16 else ""
+        if residue and atom:
+            residues.setdefault(residue, set()).add(atom)
+    return residues
+
+
 def filter_pdb_chains(content: str, chain_ids: list[str]) -> str:
     selected = set(chain_ids)
     lines = []

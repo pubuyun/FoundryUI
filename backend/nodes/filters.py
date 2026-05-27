@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 
-from backend.bio.ligand import ligand_has_atom_chirality_targets, ligand_matches_smiles_chirality
+from backend.bio.ligand import ligand_has_atom_chirality_targets, ligand_matches_smiles_chirality, validate_ligand_atom_chirality_targets
 from backend.bio.pdb import split_pdb_complex
 from backend.nodes.common import ExecutionContext, node_dir, option, payload_from_artifacts, read_payload_files, scores_to_rows
 from backend.schemas.errors import BackendError, make_error
@@ -198,6 +198,22 @@ async def filter_atoms_chirality(ctx: ExecutionContext, node: WorkflowNode, inpu
         ensure_score_alignment(ctx, node, complexes, scores, ["complexes", "score"])
     contents = read_payload_files(ctx, complexes)
     targets = await _runtime_atom_chirality_targets(ctx, node, complexes)
+    if contents:
+        _, first_ligand = split_pdb_complex(contents[0])
+        try:
+            validate_ligand_atom_chirality_targets(first_ligand, targets)
+        except ValueError as exc:
+            raise BackendError(
+                make_error(
+                    "INVALID_ATOM_CHIRALITY_SELECTION",
+                    str(exc),
+                    run_id=ctx.run_id,
+                    node_id=node.id,
+                    node_type=node.type,
+                    option_key="chiralityTargets",
+                    details={"targets": [{"atom": atom, "chirality": chirality} for atom, chirality in targets]},
+                )
+            ) from exc
     keep = []
     for index, content in enumerate(contents):
         _, complex_ligand = split_pdb_complex(content)
