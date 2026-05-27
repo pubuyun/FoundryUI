@@ -141,6 +141,7 @@ const pendingInputNodeIds = ref(new Set<string>());
 const eventSource = ref<EventSource | null>(null);
 const nodeElements = new Map<string, HTMLElement>();
 const manualSelections = reactive<Record<string, Record<string, string>>>({});
+const runtimeInputPayloads = reactive<Record<string, Record<string, any>>>({});
 const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : runState.value.toUpperCase()));
 const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
 const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
@@ -666,6 +667,7 @@ function workflowDocument() {
     workflow: normalizedWorkflow(),
     uploads: Object.fromEntries(Object.entries(uploadedByNode).map(([nodeId, files]) => [nodeId, files])),
     manualSelections: Object.fromEntries(Object.entries(manualSelections).map(([nodeId, values]) => [nodeId, { ...values }])),
+    runtimeInputPayloads: Object.fromEntries(Object.entries(runtimeInputPayloads).map(([nodeId, payloads]) => [nodeId, { ...payloads }])),
   };
 }
 
@@ -682,9 +684,16 @@ function loadWorkflowDocument(document: any) {
   Object.keys(manualSelections).forEach((nodeId) => {
     delete manualSelections[nodeId];
   });
+  Object.keys(runtimeInputPayloads).forEach((nodeId) => {
+    delete runtimeInputPayloads[nodeId];
+  });
   Object.entries(document.manualSelections ?? {}).forEach(([nodeId, values]) => {
     if (!values || typeof values !== "object" || Array.isArray(values)) return;
     manualSelections[nodeId] = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, String(value ?? "")]));
+  });
+  Object.entries(document.runtimeInputPayloads ?? {}).forEach(([nodeId, payloads]) => {
+    if (!payloads || typeof payloads !== "object" || Array.isArray(payloads)) return;
+    runtimeInputPayloads[nodeId] = payloads as Record<string, any>;
   });
   restoreManualSelections();
   if (warnings.length) {
@@ -783,6 +792,9 @@ function clearWorkflow(save: boolean | Event = true) {
   [...baklava.editor.graph.nodes].forEach((node) => baklava.editor.graph.removeNode(node));
   Object.keys(manualSelections).forEach((nodeId) => {
     delete manualSelections[nodeId];
+  });
+  Object.keys(runtimeInputPayloads).forEach((nodeId) => {
+    delete runtimeInputPayloads[nodeId];
   });
   if (save !== false) void saveSessionDocument();
 }
@@ -1214,6 +1226,7 @@ async function openRuntimeInput(event: RunEventPayload) {
     choices: event.data?.choices ?? {},
     sequence: Number(event.sequence ?? 0),
   };
+  runtimeInputPayloads[event.node_id] = pendingRunInput.value.payloads;
   if (event.data?.defaults && node) {
     Object.entries(event.data.defaults).forEach(([key, value]) => {
       const intf = node.inputs[key];
@@ -1272,7 +1285,11 @@ function nodeStructureOutput(node: AbstractNode | undefined) {
 
 async function loadViewerRuntimeFiles(nodeId: string) {
   const node = baklava.editor.graph.findNodeById(nodeId);
-  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter"].includes(String(node.type))) return;
+  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter", "FilterAtomsChirality"].includes(String(node.type))) return;
+  if (String(node.type) === "FilterAtomsChirality" && runtimeInputPayloads[nodeId]) {
+    viewerRuntimeFiles.value = await runtimeFilesFromPayloads(runtimeInputPayloads[nodeId]);
+    return;
+  }
   const output = String(node.type) === "ChainFilter" || String(node.type) === "PDBViewer"
     ? nodeStructureOutput(node) ?? connectedSourceOutput(node)
     : pendingRunInput.value?.nodeId === nodeId
@@ -1349,7 +1366,11 @@ function renderViewer() {
     viewer.render();
     return;
   }
-  viewer.addModel(file.content, "pdb");
+  const model = viewer.addModel(file.content, "pdb");
+  if (!model) {
+    viewer.render();
+    return;
+  }
   if (viewerModal.style === "stick" || viewerModal.mode === "atom" || viewerModal.mode === "proteinAtom" || viewerModal.mode === "chain") {
     viewer.setStyle({ hetflag: false }, { stick: { radius: 0.18 } });
     viewer.setStyle({ hetflag: true }, { stick: { colorscheme: "greenCarbon", radius: 0.22 } });
@@ -1399,7 +1420,13 @@ function renderViewer() {
   }
   const zoomKey = `${viewerModal.nodeId}:${viewerModal.fileIndex}:${file.name}`;
   if (zoomKey !== viewerZoomKey) {
-    viewer.zoomTo();
+    try {
+      viewer.zoomTo();
+    } catch {
+      viewerZoomKey = "";
+      viewer.render();
+      return;
+    }
     viewerZoomKey = zoomKey;
   }
   viewer.render();
