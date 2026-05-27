@@ -120,10 +120,23 @@ async def copy_paths_as_artifacts(ctx: ExecutionContext, node: WorkflowNode, pat
     for index, source in enumerate(paths, start=1):
         destination = out_dir / f"{payload_type.replace(' ', '_').lower()}_{index:04d}{source.suffix or '.pdb'}"
         shutil.copy2(source, destination)
-        artifact = ctx.store.register_file(run_id=ctx.run_id, path=destination, payload_type=payload_type, node_id=node.id, node_type=node.type)
+        artifact = ctx.store.register_file(run_id=ctx.run_id, path=destination, payload_type=payload_type, node_id=node.id, node_type=node.type, media_type=media_type_for_path(destination))
         await ctx.artifact_created(artifact)
         artifacts.append(artifact)
     return artifacts
+
+
+def media_type_for_path(path: Path) -> str:
+    lower = path.name.lower()
+    if lower.endswith(".pdb"):
+        return "chemical/x-pdb"
+    if lower.endswith(".fasta") or lower.endswith(".fa"):
+        return "text/x-fasta"
+    if lower.endswith(".json"):
+        return "application/json"
+    if lower.endswith(".csv"):
+        return "text/csv"
+    return "application/octet-stream"
 
 
 def read_payload_files(ctx: ExecutionContext, payload: TypedPayload) -> list[str]:

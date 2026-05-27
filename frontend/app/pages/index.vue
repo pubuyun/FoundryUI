@@ -386,12 +386,16 @@ function nodeByModal() {
 
 function selectorInterface(node = nodeByModal()) {
   if (!node) return undefined;
-  if (pendingRunInput.value?.fields.includes("chiralityTargets")) return node.inputs.chiralityTargets as NodeInterfaceTypeBase<string> | undefined;
+  if (isChiralityTargetMode(node)) return node.inputs.chiralityTargets as NodeInterfaceTypeBase<string> | undefined;
   if (pendingRunInput.value?.fields.includes("proteinAtoms") || viewerModal.mode === "proteinAtom") return node.inputs.proteinAtoms as NodeInterfaceTypeBase<string> | undefined;
   if (pendingRunInput.value?.fields.includes("chains") || viewerModal.mode === "chain") return node.inputs.chains as NodeInterfaceTypeBase<string> | undefined;
   if (viewerModal.mode === "atom") return node.inputs.atoms as NodeInterfaceTypeBase<string> | undefined;
   if (viewerModal.mode === "residue") return node.inputs.residues as NodeInterfaceTypeBase<string> | undefined;
   return undefined;
+}
+
+function isChiralityTargetMode(node = nodeByModal()) {
+  return Boolean(pendingRunInput.value?.fields.includes("chiralityTargets") || (node && String(node.type) === "FilterAtomsChirality" && viewerModal.mode === "atom"));
 }
 
 function selectorValue() {
@@ -1286,8 +1290,15 @@ function nodeStructureOutput(node: AbstractNode | undefined) {
 async function loadViewerRuntimeFiles(nodeId: string) {
   const node = baklava.editor.graph.findNodeById(nodeId);
   if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter", "FilterAtomsChirality"].includes(String(node.type))) return;
-  if (String(node.type) === "FilterAtomsChirality" && runtimeInputPayloads[nodeId]) {
-    viewerRuntimeFiles.value = await runtimeFilesFromPayloads(runtimeInputPayloads[nodeId]);
+  if (String(node.type) === "FilterAtomsChirality") {
+    if (pendingRunInput.value?.nodeId === nodeId && runtimeInputPayloads[nodeId]) {
+      viewerRuntimeFiles.value = await runtimeFilesFromPayloads(runtimeInputPayloads[nodeId]);
+      return;
+    }
+    const output = connectedSourceOutput(node);
+    if (output?.artifact_ids.length) {
+      viewerRuntimeFiles.value = await runtimeFilesFromArtifactIds(output.artifact_ids, output.paths);
+    }
     return;
   }
   const output = String(node.type) === "ChainFilter" || String(node.type) === "PDBViewer"
@@ -1312,10 +1323,10 @@ async function runtimeFilesFromArtifactIds(artifactIds: string[], paths: string[
   const artifactById = new Map(artifacts.value.map((artifact) => [artifact.artifact_id, artifact]));
   for (const [index, artifactId] of artifactIds.entries()) {
     const artifact = artifactById.get(artifactId);
-    if (artifact && artifact.media_type !== "chemical/x-pdb") continue;
+    const path = artifact?.path ?? paths[index] ?? artifactId;
+    if (artifact && artifact.media_type !== "chemical/x-pdb" && !path.toLowerCase().endsWith(".pdb")) continue;
     const response = await fetch(artifact ? artifactUrl(artifact) : apiUrl(`/api/artifacts/${artifactId}`));
     if (!response.ok) continue;
-    const path = artifact?.path ?? paths[index] ?? artifactId;
     files.push({ name: path.split("/").pop() || path, type: "pdb", content: await response.text() });
   }
   return files;
@@ -1326,7 +1337,7 @@ function structuresForNodeId(nodeId: string, seen = new Set<string>()): Uploaded
   if (seen.has(nodeId)) return [];
   seen.add(nodeId);
   const node = baklava.editor.graph.findNodeById(nodeId);
-  if (node && ["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter"].includes(String(node.type))) {
+  if (node && ["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter", "FilterAtomsChirality"].includes(String(node.type))) {
     return [];
   }
   const ownFiles = uploadedByNode[nodeId];
@@ -1353,22 +1364,29 @@ function renderViewer() {
   if (!viewer) return;
   if (!activeModalFile.value) {
     viewer.clear();
-    viewer.render();
+    render3dViewer();
     return;
   }
   const file = activeModalFile.value;
   viewer.clear();
   if (file.type === "fasta") {
-    viewer.render();
+    render3dViewer();
     return;
   }
   if (!file.content) {
-    viewer.render();
+    render3dViewer();
     return;
   }
-  const model = viewer.addModel(file.content, "pdb");
+  let model: any;
+  try {
+    model = viewer.addModel(file.content, "pdb");
+  } catch (error) {
+    console.warn("Failed to load PDB content into viewer", error);
+    render3dViewer();
+    return;
+  }
   if (!model) {
-    viewer.render();
+    render3dViewer();
     return;
   }
   if (viewerModal.style === "stick" || viewerModal.mode === "atom" || viewerModal.mode === "proteinAtom" || viewerModal.mode === "chain") {
@@ -1376,13 +1394,17 @@ function renderViewer() {
     viewer.setStyle({ hetflag: true }, { stick: { colorscheme: "greenCarbon", radius: 0.22 } });
   } else if (viewerModal.style === "surface") {
     viewer.setStyle({ hetflag: false }, { cartoon: { color: "lightgray" } });
-    viewer.addSurface((globalThis as any).$3Dmol?.SurfaceType?.VDW ?? 1, { opacity: 0.6, color: "white" }, { hetflag: false });
+    try {
+      viewer.addSurface((globalThis as any).$3Dmol?.SurfaceType?.VDW ?? 1, { opacity: 0.6, color: "white" }, { hetflag: false });
+    } catch (error) {
+      console.warn("Failed to create viewer surface", error);
+    }
     viewer.setStyle({ hetflag: true }, { stick: { colorscheme: "greenCarbon", radius: 0.24 } });
   } else {
     viewer.setStyle({ hetflag: false }, { cartoon: { color: "spectrum" } });
     viewer.setStyle({ hetflag: true }, { stick: { colorscheme: "greenCarbon", radius: 0.22 } });
   }
-  const selected = new Set(pendingRunInput.value?.fields.includes("chiralityTargets") ? parseChiralityTargets().map((target) => target.atom) : parseSelectorList());
+  const selected = new Set(isChiralityTargetMode() ? parseChiralityTargets().map((target) => target.atom) : parseSelectorList());
   if (viewerModal.mode === "atom") {
     selected.forEach((name) => {
       viewer.addStyle({ atom: name }, { sphere: { color: "orange", radius: 0.45 } });
@@ -1424,12 +1446,24 @@ function renderViewer() {
       viewer.zoomTo();
     } catch {
       viewerZoomKey = "";
-      viewer.render();
+      render3dViewer();
       return;
     }
     viewerZoomKey = zoomKey;
   }
-  viewer.render();
+  render3dViewer();
+}
+
+function render3dViewer() {
+  if (!viewer) return;
+  try {
+    const rendered = viewer.render();
+    if (rendered && typeof rendered.catch === "function") {
+      rendered.catch((error: unknown) => console.warn("Failed to render 3D viewer", error));
+    }
+  } catch (error) {
+    console.warn("Failed to render 3D viewer", error);
+  }
 }
 
 watch([() => viewerModal.fileIndex, () => viewerModal.style, () => viewerModal.open], () => {
@@ -1637,7 +1671,7 @@ onBeforeUnmount(() => {
               <option v-for="choice in pendingRunInput.choices.metric ?? []" :key="choice" :value="choice">{{ choice }}</option>
             </select>
           </label>
-          <div v-if="pendingRunInput?.fields.includes('chiralityTargets')" class="chirality-targets">
+          <div v-if="isChiralityTargetMode()" class="chirality-targets">
             <div v-for="target in parseChiralityTargets()" :key="target.atom" class="chirality-target">
               <span>{{ target.atom }}</span>
               <select :value="target.chirality" @change="setChiralityTarget(target.atom, ($event.target as HTMLSelectElement).value)">
