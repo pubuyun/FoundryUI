@@ -16,6 +16,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.vscode/
 backend/runs/
 backend/uploads/
 backend/sessions/
