@@ -109,6 +109,8 @@ interface WorkflowPreset {
   file: string;
 }
 
+type SidebarPanel = "logs" | "saves" | "nodes" | "issues";
+
 const baklava = useBaklava();
 baklava.settings.enableMinimap = true;
 baklava.settings.displayValueOnHover = true;
@@ -150,6 +152,7 @@ const logsEl = ref<HTMLElement | null>(null);
 const workflowFileInput = ref<HTMLInputElement | null>(null);
 const viewerRuntimeFiles = ref<UploadedStructure[]>([]);
 const pendingRunInput = ref<PendingRunInput | null>(null);
+const activeSidebarPanel = ref<SidebarPanel | null>(null);
 const logsFollowBottom = ref(true);
 const viewerModal = reactive<ViewerModal>({
   open: false,
@@ -161,6 +164,15 @@ const viewerModal = reactive<ViewerModal>({
 });
 let viewer: any;
 let viewerZoomKey = "";
+
+const sidebarPanels: Array<{ key: SidebarPanel; label: string; icon: string }> = [
+  { key: "logs", label: "Logs", icon: ">" },
+  { key: "saves", label: "Save", icon: "↓" },
+  { key: "nodes", label: "Nodes", icon: "+" },
+  { key: "issues", label: "Issues", icon: "!" },
+];
+
+const canBulkSelectAtoms = computed(() => viewerModal.mode === "atom" && !isChiralityTargetMode());
 
 function normalizeApiBase(value: string) {
   return value.trim().replace(/\/+$/, "");
@@ -362,6 +374,29 @@ function registerNodes() {
   });
 }
 
+function toggleSidebarPanel(panel: SidebarPanel) {
+  activeSidebarPanel.value = activeSidebarPanel.value === panel ? null : panel;
+  if (panel === "logs") void nextTick(scrollLogsToBottom);
+}
+
+function openSidebarPanel(panel: SidebarPanel) {
+  activeSidebarPanel.value = panel;
+  if (panel === "logs") void nextTick(scrollLogsToBottom);
+}
+
+function addNodeFromSidebar(type: string) {
+  const Constructor = registeredConstructors.get(type);
+  if (!Constructor) return;
+  const node = new Constructor();
+  const offset = baklava.editor.graph.nodes.length * 24;
+  (node as any).position = { x: 80 + (offset % 260), y: 80 + (offset % 180) };
+  baklava.editor.graph.addNode(node);
+}
+
+function specPrimaryColor(spec: FoundryNodeSpec) {
+  return portColor(spec.outputs?.[0]?.type ?? spec.inputs?.[0]?.type);
+}
+
 function portColor(typeName: string | undefined) {
   return typeName ? colorsByType[typeName as PortType] ?? "#6d7681" : "#6d7681";
 }
@@ -541,6 +576,28 @@ function toggleSelectorItem(value: string) {
   const values = parseSelectorList();
   const next = values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
   setSelectorValue(next.join(","));
+}
+
+function atomNamesFromContent(content: string) {
+  const names: string[] = [];
+  content.split(/\r?\n/).forEach((line) => {
+    if (!line.startsWith("ATOM") && !line.startsWith("HETATM")) return;
+    const name = line.slice(12, 16).trim();
+    const element = line.length >= 78 ? line.slice(76, 78).trim().toUpperCase() : "";
+    const inferred = name.replace(/^[0-9]+/, "").charAt(0).toUpperCase();
+    if (element === "H" || (!element && inferred === "H")) return;
+    if (name && !names.includes(name)) names.push(name);
+  });
+  return names;
+}
+
+function selectAllAtomsInViewer() {
+  if (!activeModalFile.value || !canBulkSelectAtoms.value) return;
+  setSelectorValue(atomNamesFromContent(activeModalFile.value.content).join(","));
+}
+
+function clearSelectorSelection() {
+  setSelectorValue("");
 }
 
 function toggleProteinAtom(atom: any) {
@@ -819,6 +876,7 @@ async function queueRun() {
     if (!validation.valid) {
       runState.value = "failed";
       runMessage.value = "Validation failed";
+      openSidebarPanel("issues");
       return;
     }
 
@@ -830,6 +888,7 @@ async function queueRun() {
       validationErrors.value = created.errors ?? [];
       runState.value = "failed";
       runMessage.value = "Run was rejected";
+      openSidebarPanel("issues");
       return;
     }
 
@@ -844,6 +903,7 @@ async function queueRun() {
   } catch (error) {
     runState.value = "failed";
     runMessage.value = error instanceof Error ? error.message : "Backend request failed";
+    openSidebarPanel("issues");
   }
 }
 
@@ -1099,6 +1159,7 @@ function handleRunEvent(event: RunEventPayload) {
     if (event.node_id) setNodePendingInput(event.node_id, false);
     if (event.data?.error) validationErrors.value = [event.data.error, ...validationErrors.value];
     if (event.node_id) markNodeError(event.node_id);
+    openSidebarPanel("issues");
     void refreshRunStatus(event.run_id);
     void refreshRunFiles(event.run_id);
     closeRunEvents();
@@ -1106,6 +1167,7 @@ function handleRunEvent(event: RunEventPayload) {
     runState.value = "completed";
     runMessage.value = "Run completed";
     clearPendingInputs();
+    openSidebarPanel("saves");
     void refreshRunStatus(event.run_id);
     void refreshRunFiles(event.run_id);
     void saveSessionDocument();
@@ -1542,9 +1604,23 @@ onBeforeUnmount(() => {
 <template>
   <main class="workbench-shell">
     <header class="topbar">
-      <div>
+      <div class="brand-block">
         <h1>FoundryUI</h1>
       </div>
+      <section class="top-run-status" aria-label="Run status">
+        <a v-if="currentRunId && (runState === 'completed' || runState === 'failed' || runState === 'stopped')" class="archive-link" :class="{ error: runState === 'failed', stopped: runState === 'stopped' }" :href="archiveUrl()" title="Download archive">
+          <span class="download-icon" aria-hidden="true">⇩</span>
+          {{ runState === "failed" ? "ERROR" : runState === "stopped" ? "STOPPED" : "ARCHIVED" }}
+        </a>
+        <span v-else class="run-state" :class="{ error: runState === 'failed', stopped: runState === 'stopped' }">{{ runStateLabel }}</span>
+        <span v-if="currentRunId" class="run-id">{{ currentRunId }}</span>
+        <span v-if="runStatus" class="run-percent">{{ runStatus.progress_percent }}%</span>
+        <span v-if="runStatus" class="run-count">{{ runStatus.completed_nodes }}/{{ runStatus.total_nodes }}</span>
+        <span class="run-message">{{ runMessage }}</span>
+        <div class="top-progress-track">
+          <div class="progress-fill" :style="{ width: `${runStatus?.progress_percent ?? 0}%` }" />
+        </div>
+      </section>
       <nav class="topbar-actions" aria-label="Workflow actions">
         <label class="api-base">
           API
@@ -1572,83 +1648,75 @@ onBeforeUnmount(() => {
       </nav>
     </header>
 
-    <section class="statusbar" aria-label="Run status">
-      <span class="run-state" :class="{ error: runState === 'failed', stopped: runState === 'stopped' }">{{ runStateLabel }}</span>
-      <span v-if="currentRunId">{{ currentRunId }}</span>
-      <span v-if="runStatus">{{ runStatus.progress_percent }}%</span>
-      <span>{{ runMessage }}</span>
-    </section>
+    <div class="workspace-body">
+      <aside class="left-sidebar" :class="{ expanded: activeSidebarPanel }" aria-label="Workspace panels">
+        <nav class="sidebar-tabs" aria-label="Panel shortcuts">
+          <button
+            v-for="panel in sidebarPanels"
+            :key="panel.key"
+            type="button"
+            class="sidebar-tab"
+            :class="{ active: activeSidebarPanel === panel.key }"
+            :title="panel.label"
+            @click="toggleSidebarPanel(panel.key)"
+          >
+            <span aria-hidden="true">{{ panel.icon }}</span>
+            <small>{{ panel.label.toUpperCase() }}</small>
+          </button>
+        </nav>
+        <section v-if="activeSidebarPanel" class="sidebar-panel">
+          <header>
+            <h2>{{ sidebarPanels.find((panel) => panel.key === activeSidebarPanel)?.label }}</h2>
+            <button type="button" class="icon-button" title="Collapse sidebar" @click="activeSidebarPanel = null">X</button>
+          </header>
 
-    <section class="canvas-panel" aria-label="Workflow canvas">
-      <ClientOnly>
-        <BaklavaEditor :view-model="baklava">
-          <template #connection="{ connection }">
-            <g class="typed-connection" :style="{ '--connection-color': connectionColor(connection) }">
-              <Components.ConnectionWrapper :connection="connection" />
-            </g>
-          </template>
-        </BaklavaEditor>
-      </ClientOnly>
-    </section>
+          <div v-if="activeSidebarPanel === 'logs'" class="sidebar-panel-body">
+            <pre ref="logsEl" class="terminal-log" @scroll="onLogsScroll">{{ runLogs.length ? runLogs.join("\n") : "No command output yet" }}</pre>
+          </div>
 
-    <aside class="run-panel" aria-label="Backend run details">
-      <section class="run-panel-section">
-        <header>
-          <h2>Status</h2>
-          <a v-if="currentRunId && (runState === 'completed' || runState === 'failed')" class="archive-link" :class="{ error: runState === 'failed' }" :href="archiveUrl()" title="Download archive">
-            <span class="download-icon" aria-hidden="true">⇩</span>
-            {{ runState === "failed" ? "ERROR" : "Archive Download" }}
-          </a>
-          <span v-else-if="runState === 'stopped'" class="stopped-label">STOPPED</span>
-        </header>
-        <div class="progress-track">
-          <div class="progress-fill" :style="{ width: `${runStatus?.progress_percent ?? 0}%` }" />
-        </div>
-        <p v-if="runStatus">
-          {{ runStatus.completed_nodes }} / {{ runStatus.total_nodes }}
-          <span v-if="runStatus.current_node_type">Current: {{ runStatus.current_node_type }}</span>
-        </p>
-        <p v-else>{{ runMessage }}</p>
+          <div v-else-if="activeSidebarPanel === 'saves'" class="sidebar-panel-body">
+            <ul v-if="savedArtifacts.length" class="artifact-list">
+              <li v-for="artifact in savedArtifacts" :key="artifact.artifact_id">
+                <a :href="artifactUrl(artifact)">{{ artifact.path }}</a>
+                <span>{{ artifact.payload_type }} · {{ artifact.item_count }}</span>
+              </li>
+            </ul>
+            <p v-else>No saved results yet</p>
+          </div>
+
+          <div v-else-if="activeSidebarPanel === 'nodes'" class="sidebar-panel-body node-browser">
+            <button v-for="spec in nodeSpecs" :key="spec.type" type="button" :style="{ '--node-browser-color': specPrimaryColor(spec) }" @click="addNodeFromSidebar(spec.type)">
+              <strong>{{ spec.title }}</strong>
+              <span>{{ spec.category }}</span>
+            </button>
+          </div>
+
+          <div v-else-if="activeSidebarPanel === 'issues'" class="sidebar-panel-body">
+            <ul v-if="validationErrors.length" class="issue-list">
+              <li v-for="(error, index) in validationErrors" :key="`${error.code ?? 'error'}-${index}`">
+                <strong>{{ error.code ?? "ERROR" }}</strong>
+                <span>{{ error.node_type || error.node_id ? `${error.node_type ?? "node"} ${error.node_id ?? ""}` : "" }}</span>
+                <p>{{ error.message ?? "Unknown error" }}</p>
+                <small v-if="formatErrorDetails(error)">{{ formatErrorDetails(error) }}</small>
+              </li>
+            </ul>
+            <p v-else>No issues</p>
+          </div>
+        </section>
+      </aside>
+
+      <section class="canvas-panel" aria-label="Workflow canvas">
+        <ClientOnly>
+          <BaklavaEditor :view-model="baklava">
+            <template #connection="{ connection }">
+              <g class="typed-connection" :style="{ '--connection-color': connectionColor(connection) }">
+                <Components.ConnectionWrapper :connection="connection" />
+              </g>
+            </template>
+          </BaklavaEditor>
+        </ClientOnly>
       </section>
-
-      <section class="run-panel-section">
-        <header>
-          <h2>Issues</h2>
-          <span>{{ validationErrors.length }}</span>
-        </header>
-        <ul v-if="validationErrors.length" class="issue-list">
-          <li v-for="(error, index) in validationErrors" :key="`${error.code ?? 'error'}-${index}`">
-            <strong>{{ error.code ?? "ERROR" }}</strong>
-            <span>{{ error.node_type || error.node_id ? `${error.node_type ?? "node"} ${error.node_id ?? ""}` : "" }}</span>
-            <p>{{ error.message ?? "Unknown error" }}</p>
-            <small v-if="formatErrorDetails(error)">{{ formatErrorDetails(error) }}</small>
-          </li>
-        </ul>
-        <p v-else-if="!validationErrors.length">No issues</p>
-      </section>
-
-      <section class="run-panel-section">
-        <header>
-          <h2>Saves</h2>
-          <span>{{ savedArtifacts.length }}</span>
-        </header>
-        <ul v-if="savedArtifacts.length" class="artifact-list">
-          <li v-for="artifact in savedArtifacts" :key="artifact.artifact_id">
-            <a :href="artifactUrl(artifact)">{{ artifact.path }}</a>
-            <span>{{ artifact.payload_type }} · {{ artifact.item_count }}</span>
-          </li>
-        </ul>
-        <p v-else>No saved results yet</p>
-      </section>
-
-      <section class="run-panel-section logs-section">
-        <header>
-          <h2>Logs</h2>
-          <span>{{ runLogs.length }}</span>
-        </header>
-        <pre ref="logsEl" class="terminal-log" @scroll="onLogsScroll">{{ runLogs.length ? runLogs.join("\n") : "No command output yet" }}</pre>
-      </section>
-    </aside>
+    </div>
 
     <div v-if="viewerModal.open" class="modal-backdrop" @click.self="closeViewer">
       <section class="viewer-modal" aria-label="3D selector">
@@ -1682,6 +1750,10 @@ onBeforeUnmount(() => {
               @input="setSelectorValue(($event.target as HTMLInputElement).value)"
             />
           </label>
+          <div v-if="canBulkSelectAtoms" class="selector-actions">
+            <button type="button" class="connect-button" @click="selectAllAtomsInViewer">Select all</button>
+            <button type="button" class="connect-button" @click="clearSelectorSelection">Clear all</button>
+          </div>
           <label v-if="viewerModal.mode === 'proteinAtom'" class="selector-value">
             Selection
             <textarea
@@ -1690,12 +1762,15 @@ onBeforeUnmount(() => {
               @input="setSelectorValue(($event.target as HTMLTextAreaElement).value)"
             />
           </label>
-          <label v-if="pendingRunInput?.fields.includes('metric')" class="selector-value">
-            Score
-            <select :value="runtimeChoiceValue('metric')" @change="setRuntimeChoiceValue('metric', ($event.target as HTMLSelectElement).value)">
-              <option v-for="choice in pendingRunInput.choices.metric ?? []" :key="choice" :value="choice">{{ choice }}</option>
-            </select>
-          </label>
+          <div v-if="pendingRunInput?.fields.includes('metric')" class="score-selector-block">
+            <label class="selector-value">
+              Score
+              <select :value="runtimeChoiceValue('metric')" @change="setRuntimeChoiceValue('metric', ($event.target as HTMLSelectElement).value)">
+                <option v-for="choice in pendingRunInput.choices.metric ?? []" :key="choice" :value="choice">{{ choice }}</option>
+              </select>
+            </label>
+            <button type="button" class="run-button" @click="submitRuntimeInput">Submit</button>
+          </div>
           <div v-if="isChiralityTargetMode()" class="chirality-targets">
             <div v-for="target in parseChiralityTargets()" :key="target.atom" class="chirality-target">
               <span>{{ target.atom }}</span>
@@ -1706,7 +1781,7 @@ onBeforeUnmount(() => {
               <button type="button" class="icon-button" title="Remove target" @click="removeChiralityTarget(target.atom)">X</button>
             </div>
           </div>
-          <button v-if="pendingRunInput" type="button" class="run-button" @click="submitRuntimeInput">Submit</button>
+          <button v-if="pendingRunInput && !pendingRunInput.fields.includes('metric')" type="button" class="run-button" @click="submitRuntimeInput">Submit</button>
           <button v-else-if="viewerModal.mode === 'residue'" type="button" class="run-button" @click="submitViewerSelection">Submit</button>
         </div>
         <div v-show="viewerModal.mode !== 'score'" ref="viewerEl" class="viewer-surface" />
@@ -1718,19 +1793,21 @@ onBeforeUnmount(() => {
 
 <style>
 .workbench-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: grid;
-  grid-template-rows: 58px 36px minmax(0, 1fr) 190px;
+  grid-template-rows: auto minmax(0, 1fr);
   background: #171d25;
 }
 
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 14px;
   border-bottom: 1px solid #ccd4dd;
   background: #fbfcfd;
-  padding: 0 16px;
+  padding: 10px 16px;
 }
 
 .topbar h1,
@@ -1746,6 +1823,10 @@ onBeforeUnmount(() => {
   letter-spacing: 0;
 }
 
+.brand-block {
+  min-width: 96px;
+}
+
 .topbar p {
   margin-top: 2px;
   color: #566271;
@@ -1753,11 +1834,53 @@ onBeforeUnmount(() => {
 }
 
 .topbar-actions,
-.statusbar,
 .viewer-controls {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.topbar-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.top-run-status {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(80px, max-content) auto auto minmax(120px, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: #344052;
+  font-size: 12px;
+}
+
+.run-id,
+.run-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-id,
+.run-percent,
+.run-count {
+  color: #566271;
+  font-weight: 700;
+}
+
+.run-message {
+  color: #17202a;
+}
+
+.top-progress-track {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #dbe3ec;
 }
 
 .api-base {
@@ -1898,19 +2021,6 @@ onBeforeUnmount(() => {
   display: none;
 }
 
-.statusbar {
-  overflow-x: auto;
-  padding: 0 14px;
-  border-bottom: 1px solid #2a3440;
-  background: #202935;
-  color: #aeb8c5;
-  font-size: 12px;
-}
-
-.statusbar span {
-  white-space: nowrap;
-}
-
 .run-state {
   padding: 4px 8px;
   border-radius: 5px;
@@ -1929,53 +2039,120 @@ onBeforeUnmount(() => {
   color: #d8b6ff;
 }
 
+.workspace-body {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .canvas-panel {
   min-width: 0;
   min-height: 0;
   position: relative;
 }
 
-.run-panel {
+.left-sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 12;
+  width: 48px;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(170px, 0.8fr) minmax(210px, 1fr) minmax(250px, 1.2fr) minmax(280px, 1.6fr);
-  gap: 1px;
-  border-top: 1px solid #2a3440;
-  background: #2a3440;
+  grid-template-columns: 48px 0;
+  border-right: 1px solid #2a3440;
+  background: #101720;
   color: #d8e1ec;
-  min-height: 0;
+  transition: grid-template-columns 180ms ease;
 }
 
-.run-panel-section {
+.left-sidebar.expanded {
+  width: min(388px, 100%);
+  grid-template-columns: 48px minmax(280px, 340px);
+}
+
+.sidebar-tabs {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px 7px;
+  border-right: 1px solid #2a3440;
+}
+
+.sidebar-tab {
+  width: 34px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  border: 1px solid #334154;
+  border-radius: 6px;
+  background: #182231;
+  color: #d8e1ec;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.sidebar-tab small {
+  display: block;
+  font-size: 7px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.sidebar-tab.active {
+  border-color: #2ca58d;
+  background: #12372f;
+  color: #7ee0c4;
+}
+
+.sidebar-panel {
+  min-height: 0;
   min-width: 0;
-  min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   background: #151c25;
-  padding: 10px 12px;
 }
 
-.run-panel-section header {
+.sidebar-panel > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2a3440;
 }
 
-.run-panel-section h2,
-.run-panel-section p {
+.sidebar-panel > header h2 {
   margin: 0;
-}
-
-.run-panel-section h2 {
   font-size: 12px;
   letter-spacing: 0;
   text-transform: uppercase;
   color: #91a0b2;
 }
 
-.run-panel-section p,
-.run-panel-section li,
-.run-panel-section pre {
+.sidebar-panel-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px;
+}
+
+.sidebar-panel-body p {
+  margin: 0;
+}
+
+.sidebar-panel-body p,
+.sidebar-panel-body li,
+.sidebar-panel-body pre {
   font-size: 12px;
 }
 
@@ -2004,8 +2181,58 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
+.archive-link {
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: #176f5d;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.node-browser {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+}
+
+.node-browser button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #334154;
+  border-left: 4px solid var(--node-browser-color, #2ca58d);
+  border-radius: 6px;
+  background: #1a2533;
+  color: #e8f0f8;
+  text-align: left;
+  cursor: pointer;
+}
+
+.node-browser button:hover {
+  border-color: color-mix(in srgb, var(--node-browser-color, #7ee0c4), white 18%);
+  border-left-color: var(--node-browser-color, #7ee0c4);
+}
+
+.node-browser strong {
+  font-size: 12px;
+}
+
+.node-browser span {
+  color: #91a0b2;
+  font-size: 11px;
+}
+
 .archive-link.error {
-  color: #ff9c9c;
+  background: #b33939;
+  color: #ffffff;
+}
+
+.archive-link.stopped {
+  background: #6d4b8d;
+  color: #ffffff;
 }
 
 .download-icon {
@@ -2063,9 +2290,11 @@ onBeforeUnmount(() => {
 }
 
 .terminal-log {
-  min-height: 120px;
-  max-height: 150px;
+  min-height: 160px;
+  height: 100%;
+  max-height: none;
   overflow: auto;
+  overscroll-behavior: contain;
   margin: 0;
   padding: 10px 12px;
   border: 1px solid #273342;
@@ -2087,6 +2316,11 @@ onBeforeUnmount(() => {
 
 .baklava-node-palette {
   display: none !important;
+}
+
+.baklava-toolbar {
+  left: auto !important;
+  right: 12px !important;
 }
 
 .baklava-context-menu {
@@ -2167,6 +2401,24 @@ onBeforeUnmount(() => {
 
 .baklava-node.foundry-node-cached {
   box-shadow: 0 0 0 2px rgba(126, 224, 196, 0.72);
+}
+
+.baklava-node.foundry-node-cached::before {
+  content: "cached";
+  position: absolute;
+  top: 4px;
+  right: 34px;
+  z-index: 1;
+  color: #7ee0c4;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.baklava-node.foundry-node-cached.foundry-node-manual::before,
+.baklava-node.foundry-node-cached.foundry-node-pending-input::before {
+  top: 19px;
 }
 
 .baklava-node.foundry-node-manual {
@@ -2308,6 +2560,7 @@ onBeforeUnmount(() => {
 
 .viewer-controls {
   margin: 12px 0;
+  flex-wrap: wrap;
 }
 
 .viewer-controls label {
@@ -2327,6 +2580,25 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   background: #ffffff;
   color: #17202a;
+}
+
+.selector-actions,
+.score-selector-block {
+  display: grid;
+  gap: 6px;
+}
+
+.selector-actions {
+  grid-template-columns: repeat(2, max-content);
+  align-self: end;
+}
+
+.score-selector-block {
+  min-width: 180px;
+}
+
+.score-selector-block .run-button {
+  width: 100%;
 }
 
 .viewer-controls textarea {
@@ -2388,22 +2660,53 @@ onBeforeUnmount(() => {
 
 @media (max-width: 760px) {
   .workbench-shell {
-    grid-template-rows: auto 44px minmax(520px, 1fr) 360px;
+    grid-template-rows: auto minmax(520px, 1fr);
   }
 
   .topbar {
     align-items: start;
     gap: 10px;
     padding: 10px 12px;
-    flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .top-run-status {
+    width: 100%;
+    grid-template-columns: auto minmax(80px, 1fr) auto auto;
+  }
+
+  .run-message {
+    grid-column: 1 / -1;
+  }
+
+  .workspace-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .left-sidebar {
+    width: 42px;
+    grid-template-columns: 42px 0;
+  }
+
+  .left-sidebar.expanded {
+    width: min(100%, 392px);
+    grid-template-columns: 42px minmax(250px, calc(100vw - 42px));
+  }
+
+  .sidebar-tabs {
+    padding: 8px 4px;
+  }
+
+  .sidebar-tab {
+    width: 32px;
+    height: 42px;
   }
 
   .viewer-controls {
     display: grid;
   }
 
-  .topbar-actions,
-  .run-panel {
+  .topbar-actions {
     width: 100%;
   }
 
@@ -2417,10 +2720,6 @@ onBeforeUnmount(() => {
 
   .api-base input {
     width: 100%;
-  }
-
-  .run-panel {
-    grid-template-columns: 1fr;
   }
 
   .viewer-surface {

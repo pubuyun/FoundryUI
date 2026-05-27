@@ -107,7 +107,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     requiresRuntimeInput: true,
     inputs: [{ key: "protein", label: "Protein", type: "Protein", optional: true }],
     options: [
-      { key: "residues", label: "Text Field", kind: "text", value: "A103,A201" },
+      { key: "residues", label: "Select manually when run reaches this node", kind: "text", value: "" },
       { key: "viewer", label: "3D Viewer residue selector", kind: "viewer", value: "Open", viewerMode: "residue" },
     ],
     outputs: [{ key: "residues", label: "List of Residues", type: "List of Residues" }],
@@ -120,7 +120,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     requiresRuntimeInput: true,
     inputs: [{ key: "ligand", label: "Ligand", type: "Ligand", optional: true }],
     options: [
-      { key: "atoms", label: "Text Field", kind: "text", value: "C1,C2" },
+      { key: "atoms", label: "Select manually when run reaches this node", kind: "text", value: "" },
       { key: "viewer", label: "3D Viewer atom selector", kind: "viewer", value: "Open", viewerMode: "atom" },
     ],
     outputs: [{ key: "atoms", label: "List of Atoms", type: "List of Atoms" }],
@@ -136,7 +136,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "protein", label: "Protein", type: "Protein" },
     ],
     options: [
-      { key: "proteinAtoms", label: "Protein atoms", kind: "textarea", value: "" },
+      { key: "proteinAtoms", label: "Select manually when run reaches this node", kind: "textarea", value: "" },
       { key: "viewer", label: "3D Viewer protein atom selector", kind: "viewer", value: "Open", viewerMode: "proteinAtom" },
     ],
     outputs: [{ key: "proteinAtoms", label: "Residues Atoms List", type: "Residues Atoms List" }],
@@ -149,7 +149,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
     requiresRuntimeInput: true,
     inputs: [{ key: "batchProtein", label: "Batch Protein", type: "Batch Protein" }],
     options: [
-      { key: "chains", label: "Chains", kind: "text", value: "" },
+      { key: "chains", label: "Select manually when run reaches this node", kind: "text", value: "" },
       { key: "viewer", label: "3D Viewer chain selector", kind: "viewer", value: "Open", viewerMode: "chain" },
     ],
     outputs: [{ key: "batchProtein", label: "Batch Protein", type: "Batch Protein" }],
@@ -323,7 +323,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "score", label: "Score", type: "Score" },
     ],
     options: [
-      { key: "metric", label: "Specific Score", kind: "select", value: "", items: [] },
+      { key: "metric", label: "Choose score field when run reaches this node", kind: "select", value: "", items: [] },
       { key: "mode", label: "Filter Mode", kind: "select", value: "Is largest top", items: ["Is largest top", "Is smallest top", "Greater than", "Smaller than"] },
       { key: "threshold", label: "top / threshold", kind: "float", value: 10 },
     ],
@@ -380,7 +380,7 @@ export const nodeSpecs: FoundryNodeSpec[] = [
       { key: "score", label: "Score", type: "Score", optional: true },
     ],
     options: [
-      { key: "chiralityTargets", label: "Atom chirality targets", kind: "textarea", value: "" },
+      { key: "chiralityTargets", label: "Select manually when run reaches this node", kind: "textarea", value: "" },
       { key: "viewer", label: "3D Selector", kind: "viewer", value: "Open", viewerMode: "atom" },
     ],
     outputs: [
