@@ -33,7 +33,7 @@
       background: rgba(255,255,255,0.045);
       margin: 1rem 0;
     }
-    .foundry-callout {
+    .markdown-section .alert {
       margin: 1.1rem 0;
       padding: 0.85rem 1rem;
       border: 1px solid rgba(255,255,255,0.12);
@@ -42,7 +42,8 @@
       background: rgba(255,255,255,0.055);
       box-shadow: 0 10px 26px rgba(0,0,0,0.18);
     }
-    .foundry-callout-title {
+    .markdown-section .alert .title,
+    .markdown-section .alert .alert-title {
       display: inline-flex;
       align-items: center;
       gap: 0.45rem;
@@ -52,22 +53,34 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
-    .foundry-callout-input {
+    .markdown-section .alert.input,
+    .markdown-section .alert.alert-input {
       border-left-color: #4678d4;
       background: rgba(70,120,212,0.12);
     }
-    .foundry-callout-input .foundry-callout-title { color: #9fbfff; }
-    .foundry-callout-options {
+    .markdown-section .alert.input .title,
+    .markdown-section .alert.input .alert-title,
+    .markdown-section .alert.alert-input .title,
+    .markdown-section .alert.alert-input .alert-title { color: #9fbfff; }
+    .markdown-section .alert.options,
+    .markdown-section .alert.alert-options {
       border-left-color: #d28a19;
       background: rgba(210,138,25,0.12);
     }
-    .foundry-callout-options .foundry-callout-title { color: #ffc46d; }
-    .foundry-callout-output {
+    .markdown-section .alert.options .title,
+    .markdown-section .alert.options .alert-title,
+    .markdown-section .alert.alert-options .title,
+    .markdown-section .alert.alert-options .alert-title { color: #ffc46d; }
+    .markdown-section .alert.output,
+    .markdown-section .alert.alert-output {
       border-left-color: #56d3b7;
       background: rgba(86,211,183,0.12);
     }
-    .foundry-callout-output .foundry-callout-title { color: #84f0d8; }
-    .foundry-callout > *:last-child { margin-bottom: 0; }
+    .markdown-section .alert.output .title,
+    .markdown-section .alert.output .alert-title,
+    .markdown-section .alert.alert-output .title,
+    .markdown-section .alert.alert-output .alert-title { color: #84f0d8; }
+    .markdown-section .alert > *:last-child { margin-bottom: 0; }
   </style>
 </head>
 <body>
@@ -91,30 +104,25 @@
         depth: 6,
         hideOtherSidebarContent: false
       },
-      plugins: [
-        function foundryCallouts(hook) {
-          hook.doneEach(function () {
-            document.querySelectorAll('.markdown-section blockquote').forEach(function (quote) {
-              var first = quote.textContent.trim().toLowerCase();
-              var match = first.match(/^\\[!(input|options|output)\\]/);
-              if (!match || quote.classList.contains('foundry-callout')) return;
-              var type = match[1];
-              quote.classList.add('foundry-callout', 'foundry-callout-' + type);
-              quote.innerHTML = '<div class="foundry-callout-title">' + type + '</div>';
-              var sibling = quote.nextElementSibling;
-              while (sibling && !/^H[1-6]$/.test(sibling.tagName)) {
-                if (sibling.tagName === 'BLOCKQUOTE' && /^\\[!(input|options|output)\\]/i.test(sibling.textContent.trim())) break;
-                var next = sibling.nextElementSibling;
-                quote.appendChild(sibling);
-                sibling = next;
-              }
-            });
-          });
+      'flexible-alerts': {
+        style: 'callout',
+        input: {
+          label: 'Input',
+          className: 'input'
+        },
+        options: {
+          label: 'Options',
+          className: 'options'
+        },
+        output: {
+          label: 'Output',
+          className: 'output'
         }
-      ]
+      }
     };
   </script>
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+  <script src="https://unpkg.com/docsify-plugin-flexible-alerts"></script>
 </body>
 </html>

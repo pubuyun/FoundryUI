@@ -5,8 +5,8 @@ Creates <span class="type ligand">Ligand</span> for one uploaded PDB or <span cl
 </div>
 
 > [!options]
-- `Upload File`: one or more `.pdb` files.
-- `Open`: shows the uploaded ligand in the viewer.
+> - `Upload File`: one or more `.pdb` files.
+> - `Open`: shows the uploaded ligand in the viewer.
 
 Behavior:
 
@@ -14,4 +14,4 @@ Behavior:
 - Batch ligand uploads are standardized but are not residue-renamed.
 
 > [!output]
-- `ligand`: <span class="type ligand">Ligand</span> or <span class="type batch-ligand">Batch Ligand</span>.
+> - `ligand`: <span class="type ligand">Ligand</span> or <span class="type batch-ligand">Batch Ligand</span>.

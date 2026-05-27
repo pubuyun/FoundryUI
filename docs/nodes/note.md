@@ -3,7 +3,7 @@
 Canvas-only note node for workflow annotation.
 
 > [!options]
-- `Text Field`: Markdown-style note text.
+> - `Text Field`: Markdown-style note text.
 
 > [!output]
-- None.
+> - None.
