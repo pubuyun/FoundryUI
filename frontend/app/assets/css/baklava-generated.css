@@ -1,0 +1,154 @@
+.canvas-panel > div,
+.canvas-panel .baklava-editor {
+  width: 100%;
+  height: 100%;
+}
+
+.baklava-node-palette {
+  display: none !important;
+}
+
+.baklava-toolbar {
+  flex-direction: row-reverse !important;
+}
+
+.baklava-minimap {
+  margin-top: 60px !important;
+}
+
+.baklava-context-menu {
+  width: max-content !important;
+  min-width: 220px;
+  max-width: none !important;
+  max-height: none !important;
+  overflow: visible !important;
+  border: 1px solid rgba(190, 207, 226, 0.24);
+  border-radius: 8px !important;
+}
+
+.baklava-context-menu > .item {
+  min-height: 30px;
+  border-left: 4px solid #6d7681;
+  white-space: nowrap;
+}
+
+.baklava-context-menu > .item > .__label {
+  white-space: nowrap;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 1) {
+  border-left-color: #249a86;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 2) {
+  border-left-color: #c74b67;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 3) {
+  border-left-color: #7d8b23;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 4) {
+  border-left-color: #9062ce;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n + 5) {
+  border-left-color: #d28a19;
+}
+
+.baklava-context-menu > .item:nth-of-type(6n) {
+  border-left-color: #e2559b;
+}
+
+@media (max-height: 760px), (max-width: 900px) {
+  .baklava-context-menu:not(.--nested) {
+    min-width: min(560px, calc(100vw - 32px));
+    column-count: 2;
+    column-gap: 0;
+    column-fill: balance;
+  }
+
+  .baklava-context-menu:not(.--nested) > .item,
+  .baklava-context-menu:not(.--nested) > .divider {
+    break-inside: avoid;
+  }
+}
+
+.baklava-node {
+  border-top: 4px solid var(--foundry-node-color, #6d7681) !important;
+}
+
+.baklava-node-interface .__port {
+  background: var(--foundry-port-color, #6d7681) !important;
+  border-color: color-mix(in srgb, var(--foundry-port-color, #6d7681), white 30%) !important;
+}
+
+.typed-connection .baklava-connection {
+  stroke: var(--connection-color, #6d7681) !important;
+}
+
+.baklava-node.foundry-node-error {
+  border-top-color: #ff5252 !important;
+  box-shadow: 0 0 0 2px rgba(255, 82, 82, 0.75);
+}
+
+.baklava-node.foundry-node-cached {
+  box-shadow: 0 0 0 2px rgba(126, 224, 196, 0.72);
+}
+
+.baklava-node.foundry-node-cached::before {
+  content: "cached";
+  position: absolute;
+  top: 4px;
+  right: 34px;
+  z-index: 1;
+  color: #7ee0c4;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.baklava-node.foundry-node-cached.foundry-node-manual::before,
+.baklava-node.foundry-node-cached.foundry-node-pending-input::before {
+  top: 19px;
+}
+
+.baklava-node.foundry-node-manual {
+  border-style: dashed;
+  box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.55);
+}
+
+.baklava-node.foundry-node-manual::after {
+  content: "manual";
+  position: absolute;
+  top: 4px;
+  right: 34px;
+  z-index: 1;
+  color: #ffb86b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.baklava-node.foundry-node-pending-input {
+  animation: foundryPendingInput 0.9s ease-in-out infinite;
+  border-top-color: #ffb86b !important;
+}
+
+.baklava-node.foundry-node-pending-input::after {
+  content: "input";
+  color: #ffd29a;
+}
+
+@keyframes foundryPendingInput {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.55), 0 0 0 1px rgba(255, 184, 107, 0.2);
+  }
+
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.9), 0 0 0 4px rgba(255, 184, 107, 0.38), 0 0 18px rgba(255, 184, 107, 0.45);
+  }
+}

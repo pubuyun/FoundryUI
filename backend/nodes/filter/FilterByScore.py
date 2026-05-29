@@ -67,7 +67,19 @@ class FilterByScore(FilterNode):
 
     @classmethod
     async def runtime_score_metric(cls, ctx, node, score_payload):
-        fields = cls.numeric_score_fields(cls.score_list(score_payload.data))
+        score_list = cls.score_list(score_payload.data)
+        if not score_list:
+            raise BackendError(
+                make_error(
+                    "NO_SCORES",
+                    "Score input does not contain any scores to filter by.",
+                    run_id=ctx.run_id,
+                    node_id=node.id,
+                    node_type=node.type,
+                    interface_key="score",
+                )
+            )
+        fields = cls.numeric_score_fields(score_list)
         if not fields:
             raise BackendError(
                 make_error(

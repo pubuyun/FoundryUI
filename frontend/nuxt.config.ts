@@ -1,4 +1,7 @@
+import tailwindcss from "@tailwindcss/vite";
+
 export default defineNuxtConfig({
+  css: ["~/assets/css/tailwind.css"],
   devtools: { enabled: true },
   future: {
     compatibilityVersion: 4,
@@ -7,6 +10,7 @@ export default defineNuxtConfig({
     typeCheck: true,
   },
   vite: {
+    plugins: [tailwindcss()],
     ssr: {
       noExternal: [
         "baklavajs",

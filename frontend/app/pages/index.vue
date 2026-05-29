@@ -16,6 +16,7 @@ import {
 } from "baklavajs";
 import { BaklavaInterfaceTypes, NodeInterfaceType, getType, setType } from "@baklavajs/interface-types";
 import "@baklavajs/themes/dist/syrup-dark.css";
+import "../assets/css/baklava-generated.css";
 import {
   type NodeCatalogResponse,
   proteinExample,
@@ -24,90 +25,31 @@ import {
   type PortSpec,
   type PortType,
 } from "../utils/foundrySpecs";
-
-interface UploadedStructure {
-  name: string;
-  type: "pdb" | "fasta" | "unknown";
-  content: string;
-}
-
-interface ViewerModal {
-  open: boolean;
-  nodeId: string;
-  title: string;
-  mode: NonNullable<OptionSpec["viewerMode"]>;
-  fileIndex: number;
-  style: "cartoon" | "stick" | "surface";
-}
-
-interface PendingRunInput {
-  runId: string;
-  nodeId: string;
-  nodeType: string;
-  fields: string[];
-  payloads: Record<string, any>;
-  choices: Record<string, string[]>;
-  sequence: number;
-}
-
-interface BackendArtifact {
-  artifact_id: string;
-  payload_type: string;
-  media_type: string;
-  path: string;
-  byte_size: number;
-  item_count: number;
-  node_id?: string | null;
-  node_type?: string | null;
-}
-
-interface BackendOutput {
-  node_id: string;
-  output_key: string;
-  type_name: string;
-  item_count: number;
-  artifact_ids: string[];
-  paths: string[];
-}
-
-interface RunStatus {
-  run_id: string;
-  state: string;
-  current_node_id?: string | null;
-  current_node_type?: string | null;
-  completed_nodes: number;
-  total_nodes: number;
-  progress_percent: number;
-  recent_output: string[];
-  warnings: Array<Record<string, any>>;
-  errors: Array<Record<string, any>>;
-  pending_inputs?: RunEventPayload[];
-}
-
-interface RunEventPayload {
-  event: string;
-  run_id: string;
-  sequence?: number;
-  node_id?: string | null;
-  node_type?: string | null;
-  message?: string | null;
-  data?: Record<string, any>;
-}
-
-interface SessionRecord {
-  session_id: string;
-  created_at: string;
-  updated_at: string;
-  latest_run_id?: string | null;
-  document?: Record<string, any> | null;
-}
-
-interface WorkflowPreset {
-  label: string;
-  file: string;
-}
-
-type SidebarPanel = "logs" | "saves" | "nodes" | "issues";
+import { formatErrorDetails, normalizeApiBase, readBackendMessage } from "../utils/backendMessages";
+import {
+  atomId,
+  atomNamesFromContent,
+  detectStructureType,
+  formatChiralityTargets,
+  formatProteinAtomMap,
+  parseChiralityTargets,
+  parseProteinAtomMap,
+  parseSelectorList,
+  residueId,
+  residueSelection,
+} from "../utils/structureSelection";
+import type {
+  BackendArtifact,
+  BackendOutput,
+  PendingRunInput,
+  RunEventPayload,
+  RunStatus,
+  SessionRecord,
+  SidebarPanel,
+  UploadedStructure,
+  ViewerModal,
+  WorkflowPreset,
+} from "../utils/workbenchTypes";
 
 const baklava = useBaklava();
 baklava.settings.enableMinimap = true;
@@ -151,7 +93,6 @@ const runStateLabel = computed(() => (runState.value === "failed" ? "ERROR" : ru
 const isRunActive = computed(() => runState.value === "validating" || runState.value === "queued" || runState.value === "running");
 const normalizedApiBase = computed(() => normalizeApiBase(apiBase.value));
 const viewerEl = ref<HTMLElement | null>(null);
-const logsEl = ref<HTMLElement | null>(null);
 const workflowFileInput = ref<HTMLInputElement | null>(null);
 const viewerRuntimeFiles = ref<UploadedStructure[]>([]);
 const pendingRunInput = ref<PendingRunInput | null>(null);
@@ -167,6 +108,7 @@ const viewerModal = reactive<ViewerModal>({
 });
 let viewer: any;
 let viewerZoomKey = "";
+let viewerOpenSequence = 0;
 let catalogRegistered = false;
 
 const sidebarPanels: Array<{ key: SidebarPanel; label: string; icon: string }> = [
@@ -177,10 +119,6 @@ const sidebarPanels: Array<{ key: SidebarPanel; label: string; icon: string }> =
 ];
 
 const canBulkSelectAtoms = computed(() => viewerModal.mode === "atom" && !isChiralityTargetMode());
-
-function normalizeApiBase(value: string) {
-  return value.trim().replace(/\/+$/, "");
-}
 
 function apiUrl(path: string) {
   const base = normalizedApiBase.value;
@@ -257,15 +195,16 @@ const FileUploadControl = markRaw(
       }
 
       return () =>
-        h("label", { class: "node-file-upload" }, [
-              h("span", (props.intf as NodeInterfaceTypeBase).name),
+        h("label", { class: "grid gap-1.5 p-2" }, [
+              h("span", { class: "text-xs text-[#d7dee8]" }, (props.intf as NodeInterfaceTypeBase).name),
               h("input", {
+                class: "w-full text-xs text-[#d7dee8] bg-[#176f5d] cursor-pointer rounded-md border border-[#64758b] px-1 py-0.5",
                 type: "file",
                 multiple: true,
-                accept: (props.intf as any).accept,
+                accept: (props.intf as any).accept, 
                 onChange,
               }),
-              status.value ? h("small", status.value) : null,
+              status.value ? h("small", { class: "text-[#7ee0c4]" }, status.value) : null,
             ])
     },
   }),
@@ -287,7 +226,7 @@ const ViewerButtonControl = markRaw(
         h(
               "button",
               {
-                class: "node-viewer-button",
+                class: "mx-2 my-1.5 min-h-[30px] w-[calc(100%_-_16px)] cursor-pointer rounded-md border border-[#64758b] bg-[#273242] text-[#eef4fb]",
                 type: "button",
                 title: (props.intf as NodeInterfaceTypeBase).name,
                 onClick: open,
@@ -297,13 +236,6 @@ const ViewerButtonControl = markRaw(
     },
   }),
 );
-
-function detectStructureType(fileName: string): UploadedStructure["type"] {
-  const lower = fileName.toLowerCase();
-  if (lower.endsWith(".pdb")) return "pdb";
-  if (lower.endsWith(".fasta") || lower.endsWith(".fa")) return "fasta";
-  return "unknown";
-}
 
 function createPortInterface(port: PortSpec, isInput = false) {
   const intf = new NodeInterface(port.optional ? `${port.label}*` : port.label, null);
@@ -412,6 +344,8 @@ function portColor(typeName: string | undefined) {
 }
 
 function primaryNodeColor(node: AbstractNode) {
+  const spec = specForNode(node);
+  if (spec) return specPrimaryColor(spec);
   const output = Object.values(node.outputs).find((intf) => getType(intf));
   const input = Object.values(node.inputs).find((intf) => getType(intf));
   return portColor(output || input ? getType((output ?? input)!) : undefined);
@@ -504,124 +438,17 @@ function setSelectorValue(value: string) {
   }
 }
 
-function parseSelectorList(value = selectorValue()) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function atomId(atom: any) {
-  return String(atom.atom || atom.name || `${atom.elem ?? "Atom"}${atom.serial ?? (typeof atom.index === "number" ? atom.index + 1 : "")}`);
-}
-
-function residueId(atom: any) {
-  const resn = String(atom.resn || atom.residue || "").trim();
-  if (resn && !STANDARD_RESIDUES.has(resn.toUpperCase())) return resn;
-  const chain = atom.chain || "";
-  const resi = atom.resi ?? atom.residueIndex ?? "";
-  return `${chain}${resi}`;
-}
-
-const STANDARD_RESIDUES = new Set([
-  "ALA",
-  "ARG",
-  "ASN",
-  "ASP",
-  "CYS",
-  "GLN",
-  "GLU",
-  "GLY",
-  "HIS",
-  "ILE",
-  "LEU",
-  "LYS",
-  "MET",
-  "PHE",
-  "PRO",
-  "SER",
-  "THR",
-  "TRP",
-  "TYR",
-  "VAL",
-]);
-
-function residueSelection(residue: string) {
-  if (/^[A-Za-z]\d+$/.test(residue)) {
-    return { chain: residue[0], resi: Number(residue.slice(1)) };
-  }
-  return { resn: residue };
-}
-
-function parseProteinAtomMap(value = selectorValue()): Record<string, string[]> {
-  const text = value.trim();
-  if (!text) return {};
-  try {
-    const data = JSON.parse(text);
-    if (data && typeof data === "object" && !Array.isArray(data)) {
-      return Object.fromEntries(
-        Object.entries(data)
-          .map(([residue, atoms]) => [
-            residue.trim(),
-            Array.isArray(atoms)
-              ? atoms.map((atom) => String(atom).trim()).filter(Boolean)
-              : String(atoms ?? "")
-                  .split(",")
-                  .map((atom) => atom.trim())
-                  .filter(Boolean),
-          ])
-          .filter(([residue, atoms]) => residue && (atoms as string[]).length),
-      );
-    }
-  } catch {
-    // Fall through to "A56:CG,OH; A115:CG" parsing.
-  }
-  const parsed: Record<string, string[]> = {};
-  text
-    .replace(/\n/g, ";")
-    .split(";")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .forEach((entry) => {
-      const [residue, atoms] = entry.split(":", 2);
-      const atomNames = String(atoms ?? "")
-        .split(",")
-        .map((atom) => atom.trim())
-        .filter(Boolean);
-      if (residue?.trim() && atomNames.length) parsed[residue.trim()] = atomNames;
-    });
-  return parsed;
-}
-
-function formatProteinAtomMap(value: Record<string, string[]>) {
-  const compact = Object.fromEntries(Object.entries(value).filter(([, atoms]) => atoms.length).map(([residue, atoms]) => [residue, [...new Set(atoms)].join(",")]));
-  return JSON.stringify(compact, null, 2);
-}
-
 function toggleSelectorItem(value: string) {
   if (pendingRunInput.value?.fields.includes("chiralityTargets")) {
-    const targets = parseChiralityTargets();
+    const targets = parseChiralityTargets(selectorValue());
     const existing = targets.find((target) => target.atom === value);
     const next = existing ? targets.filter((target) => target.atom !== value) : [...targets, { atom: value, chirality: "R" }];
     setSelectorValue(formatChiralityTargets(next));
     return;
   }
-  const values = parseSelectorList();
+  const values = parseSelectorList(selectorValue());
   const next = values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
   setSelectorValue(next.join(","));
-}
-
-function atomNamesFromContent(content: string) {
-  const names: string[] = [];
-  content.split(/\r?\n/).forEach((line) => {
-    if (!line.startsWith("ATOM") && !line.startsWith("HETATM")) return;
-    const name = line.slice(12, 16).trim();
-    const element = line.length >= 78 ? line.slice(76, 78).trim().toUpperCase() : "";
-    const inferred = name.replace(/^[0-9]+/, "").charAt(0).toUpperCase();
-    if (element === "H" || (!element && inferred === "H")) return;
-    if (name && !names.includes(name)) names.push(name);
-  });
-  return names;
 }
 
 function selectAllAtomsInViewer() {
@@ -637,35 +464,19 @@ function toggleProteinAtom(atom: any) {
   const residue = residueId(atom);
   const name = atomId(atom);
   if (!residue || !name) return;
-  const selected = parseProteinAtomMap();
+  const selected = parseProteinAtomMap(selectorValue());
   const atoms = selected[residue] ?? [];
   selected[residue] = atoms.includes(name) ? atoms.filter((atomName) => atomName !== name) : [...atoms, name];
   if (!selected[residue].length) delete selected[residue];
   setSelectorValue(formatProteinAtomMap(selected));
 }
 
-function parseChiralityTargets(value = selectorValue()) {
-  return value
-    .split(/[,;\n]+/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const [atom, chirality] = entry.split(/[:=\s]+/);
-      return { atom: atom ?? "", chirality: (chirality ?? "R").toUpperCase() === "S" ? "S" : "R" };
-    })
-    .filter((target) => target.atom);
-}
-
-function formatChiralityTargets(targets: Array<{ atom: string; chirality: string }>) {
-  return targets.map((target) => `${target.atom}:${target.chirality === "S" ? "S" : "R"}`).join(", ");
-}
-
 function setChiralityTarget(atom: string, chirality: string) {
-  setSelectorValue(formatChiralityTargets(parseChiralityTargets().map((target) => (target.atom === atom ? { ...target, chirality } : target))));
+  setSelectorValue(formatChiralityTargets(parseChiralityTargets(selectorValue()).map((target) => (target.atom === atom ? { ...target, chirality } : target))));
 }
 
 function removeChiralityTarget(atom: string) {
-  setSelectorValue(formatChiralityTargets(parseChiralityTargets().filter((target) => target.atom !== atom)));
+  setSelectorValue(formatChiralityTargets(parseChiralityTargets(selectorValue()).filter((target) => target.atom !== atom)));
 }
 
 function submitViewerSelection() {
@@ -1225,37 +1036,6 @@ function closeRunEvents() {
   eventSource.value = null;
 }
 
-function readBackendMessage(payload: any, fallback: string) {
-  if (typeof payload?.detail === "string") return payload.detail;
-  if (payload?.detail?.message) return payload.detail.message;
-  if (payload?.message) return payload.message;
-  return fallback || "Backend request failed";
-}
-
-function formatErrorDetails(error: Record<string, any>) {
-  const details = error.details;
-  if (!details || typeof details !== "object") return "";
-  const parts: string[] = [];
-  const detailFields: Array<[string, string]> = [
-    ["missing_atoms", "Missing atoms"],
-    ["missing_residues", "Missing residues"],
-    ["missing_chains", "Missing chains"],
-    ["missing_entries", "Missing entries"],
-    ["invalid_entries", "Invalid entries"],
-  ];
-  detailFields.forEach(([key, label]) => {
-    const value = details[key];
-    if (Array.isArray(value) && value.length) parts.push(`${label}: ${value.join(", ")}`);
-  });
-  if (details.missing_atoms && !Array.isArray(details.missing_atoms) && typeof details.missing_atoms === "object") {
-    const value = Object.entries(details.missing_atoms)
-      .map(([residue, atoms]) => `${residue}: ${Array.isArray(atoms) ? atoms.join(", ") : String(atoms)}`)
-      .join("; ");
-    if (value) parts.push(`Missing atoms: ${value}`);
-  }
-  return parts.join(" | ");
-}
-
 function artifactUrl(artifact: BackendArtifact) {
   return apiUrl(`/api/artifacts/${artifact.artifact_id}`);
 }
@@ -1264,16 +1044,15 @@ function archiveUrl() {
   return currentRunId.value ? apiUrl(`/api/runs/${currentRunId.value}/archive`) : "#";
 }
 
-function onLogsScroll() {
-  const el = logsEl.value;
+function onLogsScroll(event: Event) {
+  const el = event.target as HTMLElement | null;
   if (!el) return;
   logsFollowBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
 }
 
 function scrollLogsToBottom() {
-  const el = logsEl.value;
-  if (!el) return;
-  el.scrollTop = el.scrollHeight;
+  const el = document.querySelector<HTMLElement>(".terminal-log");
+  if (el) el.scrollTop = el.scrollHeight;
 }
 
 function markNodeError(nodeId: string) {
@@ -1327,6 +1106,8 @@ async function openViewer(nodeId: string, title: string, mode: ViewerModal["mode
   if (pendingRunInput.value?.nodeId !== nodeId) {
     pendingRunInput.value = null;
   }
+  viewerZoomKey = "";
+  viewerOpenSequence += 1;
   viewerModal.open = true;
   viewerModal.nodeId = nodeId;
   viewerModal.title = title;
@@ -1356,6 +1137,8 @@ async function openRuntimeInput(event: RunEventPayload) {
       if (intf) intf.value = String(value ?? "");
     });
   }
+  viewerZoomKey = "";
+  viewerOpenSequence += 1;
   viewerModal.open = true;
   viewerModal.nodeId = event.node_id;
   viewerModal.title = node?.title ?? event.node_type;
@@ -1369,6 +1152,7 @@ async function openRuntimeInput(event: RunEventPayload) {
 function closeViewer() {
   viewerModal.open = false;
   viewerZoomKey = "";
+  viewer = null;
 }
 
 function connectedSourceNode(node: AbstractNode) {
@@ -1470,6 +1254,11 @@ async function initializeViewer() {
   if (!viewerEl.value || !import.meta.client || !viewerModal.open) return;
   const mol = await import("3dmol");
   viewer = mol.createViewer(viewerEl.value, { backgroundColor: "white" });
+  try {
+    viewer.resize();
+  } catch {
+    // Some 3Dmol builds do not expose resize; zoom/render below still handles sizing.
+  }
   renderViewer();
 }
 
@@ -1517,7 +1306,7 @@ function renderViewer() {
     viewer.setStyle({ hetflag: false }, { cartoon: { color: "spectrum" } });
     viewer.setStyle({ hetflag: true }, { stick: { colorscheme: "greenCarbon", radius: 0.22 } });
   }
-  const selected = new Set(isChiralityTargetMode() ? parseChiralityTargets().map((target) => target.atom) : parseSelectorList());
+  const selected = new Set(isChiralityTargetMode() ? parseChiralityTargets(selectorValue()).map((target) => target.atom) : parseSelectorList(selectorValue()));
   if (viewerModal.mode === "atom") {
     selected.forEach((name) => {
       viewer.addStyle({ atom: name }, { sphere: { color: "orange", radius: 0.45 } });
@@ -1534,7 +1323,7 @@ function renderViewer() {
       if (value) toggleSelectorItem(value);
     });
   } else if (viewerModal.mode === "proteinAtom") {
-    const proteinAtoms = parseProteinAtomMap();
+    const proteinAtoms = parseProteinAtomMap(selectorValue());
     Object.entries(proteinAtoms).forEach(([residue, atoms]) => {
       const residueSpec = residueSelection(residue);
       atoms.forEach((atom) => {
@@ -1553,9 +1342,10 @@ function renderViewer() {
       if (chain) toggleSelectorItem(chain);
     });
   }
-  const zoomKey = `${viewerModal.nodeId}:${viewerModal.fileIndex}:${file.name}`;
+  const zoomKey = `${viewerOpenSequence}:${viewerModal.nodeId}:${viewerModal.fileIndex}:${file.name}`;
   if (zoomKey !== viewerZoomKey) {
     try {
+      viewer.resize?.();
       viewer.zoomTo();
     } catch {
       viewerZoomKey = "";
@@ -1622,110 +1412,77 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="workbench-shell">
-    <header class="topbar">
-      <div class="brand-block">
-        <h1>FoundryUI</h1>
-      </div>
-      <section class="top-run-status" aria-label="Run status">
-        <a v-if="currentRunId && (runState === 'completed' || runState === 'failed' || runState === 'stopped')" class="archive-link" :class="{ error: runState === 'failed', stopped: runState === 'stopped' }" :href="archiveUrl()" title="Download archive">
-          <span class="download-icon" aria-hidden="true">⇩</span>
-          {{ runState === "failed" ? "ERROR" : runState === "stopped" ? "STOPPED" : "ARCHIVED" }}
-        </a>
-        <span v-else class="run-state" :class="{ error: runState === 'failed', stopped: runState === 'stopped' }">{{ runStateLabel }}</span>
-        <span v-if="currentRunId" class="run-id">{{ currentRunId }}</span>
-        <span v-if="runStatus" class="run-percent">{{ runStatus.progress_percent }}%</span>
-        <span v-if="runStatus" class="run-count">{{ runStatus.completed_nodes }}/{{ runStatus.total_nodes }}</span>
-        <span class="run-message">{{ runMessage }}</span>
-        <div class="top-progress-track">
-          <div class="progress-fill" :style="{ width: `${runStatus?.progress_percent ?? 0}%` }" />
-        </div>
-      </section>
-      <nav class="topbar-actions" aria-label="Workflow actions">
-        <label class="api-base">
-          API
-          <input v-model="apiBase" placeholder="http://127.0.0.1:3000/api" spellcheck="false" @keyup.enter="connectApi" />
-        </label>
-        <button type="button" class="connect-button" :disabled="apiStatus === 'checking'" @click="connectApi">
-          {{ apiStatus === "checking" ? "Checking" : "Connect" }}
-        </button>
-        <span class="api-feedback" :class="apiStatus">{{ apiMessage }}</span>
-        <span v-if="currentSessionId" class="session-chip">{{ currentSessionId.slice(0, 18) }}</span>
-        <NuxtLink class="doc-link" to="/sessions">Sessions</NuxtLink>
-        <button type="button" class="icon-button" title="New session" @click="createNewSession">N</button>
-        <button type="button" class="icon-button" title="Save workflow" @click="saveWorkflow">S</button>
-        <div class="load-workflow-menu">
-          <button type="button" class="icon-button" title="Load workflow file" @click="requestLoadWorkflow">L</button>
-          <select v-model="selectedWorkflowPreset" title="Load workflow preset" @change="loadWorkflowPreset">
-            <option value="">Presets</option>
-            <option v-for="preset in workflowPresets" :key="preset.file" :value="preset.file">{{ preset.label }}</option>
-          </select>
-        </div>
-        <button type="button" class="icon-button" title="Clear canvas" @click="clearWorkflow">C</button>
-        <button v-if="isRunActive" type="button" class="stop-button" @click="stopRun">Stop</button>
-        <button type="button" class="run-button" :disabled="isRunActive" @click="queueRun">Run</button>
-        <input ref="workflowFileInput" class="workflow-file-input" type="file" accept=".fuiworkflow" @change="loadWorkflow" />
-      </nav>
-    </header>
+  <main class="grid h-screen grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#171d25] max-md:grid-rows-[auto_minmax(520px,1fr)]">
+    <TopRunBar
+      v-model:api-base="apiBase"
+      v-model:selected-workflow-preset="selectedWorkflowPreset"
+      :current-run-id="currentRunId"
+      :current-session-id="currentSessionId"
+      :run-state="runState"
+      :run-state-label="runStateLabel"
+      :run-status="runStatus"
+      :run-message="runMessage"
+      :archive-href="archiveUrl()"
+      :api-status="apiStatus"
+      :api-message="apiMessage"
+      :workflow-presets="workflowPresets"
+      :is-run-active="isRunActive"
+      @connect="connectApi"
+      @create-new-session="createNewSession"
+      @save-workflow="saveWorkflow"
+      @request-load-workflow="requestLoadWorkflow"
+      @load-workflow-preset="loadWorkflowPreset"
+      @clear-workflow="clearWorkflow"
+      @stop-run="stopRun"
+      @queue-run="queueRun"
+    />
+    <input ref="workflowFileInput" class="hidden" type="file" accept=".fuiworkflow" @change="loadWorkflow" />
 
-    <div class="workspace-body">
-      <aside class="left-sidebar" :class="{ expanded: activeSidebarPanel }" aria-label="Workspace panels">
-        <nav class="sidebar-tabs" aria-label="Panel shortcuts">
+    <div class="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden">
+      <aside
+        class="absolute inset-y-0 left-0 z-10 grid min-h-0 border-r border-[#2a3440] bg-[#101720] text-[#d8e1ec] transition-[grid-template-columns] duration-200 max-md:grid-cols-[42px_0]"
+        :class="activeSidebarPanel ? 'w-[min(388px,100%)] grid-cols-[48px_minmax(280px,340px)] max-md:w-[min(100%,392px)] max-md:grid-cols-[42px_minmax(250px,calc(100vw_-_42px))]' : 'w-12 grid-cols-[48px_0] max-md:w-[42px]'"
+        aria-label="Workspace panels"
+      >
+        <nav class="grid content-start gap-2 border-r border-[#2a3440] px-[7px] py-2.5 max-md:px-1 max-md:py-2" aria-label="Panel shortcuts">
           <button
             v-for="panel in sidebarPanels"
             :key="panel.key"
             type="button"
-            class="sidebar-tab"
-            :class="{ active: activeSidebarPanel === panel.key }"
+            class="grid h-[42px] w-[34px] cursor-pointer content-center place-items-center gap-px rounded-md border text-[15px] font-black max-md:w-16"
+            :class="activeSidebarPanel === panel.key ? 'border-[#2ca58d] bg-[#12372f] text-[#7ee0c4]' : 'border-[#334154] bg-[#182231] text-[#d8e1ec]'"
             :title="panel.label"
             @click="toggleSidebarPanel(panel.key)"
           >
             <span aria-hidden="true">{{ panel.icon }}</span>
-            <small>{{ panel.label.toUpperCase() }}</small>
+            <small class="block text-[7px] leading-none font-black tracking-normal">{{ panel.label.toUpperCase() }}</small>
           </button>
         </nav>
-        <section v-if="activeSidebarPanel" class="sidebar-panel">
-          <header>
-            <h2>{{ sidebarPanels.find((panel) => panel.key === activeSidebarPanel)?.label }}</h2>
-            <button type="button" class="icon-button" title="Collapse sidebar" @click="activeSidebarPanel = null">X</button>
+        <section v-if="activeSidebarPanel" class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#151c25]">
+          <header class="flex min-w-0 items-center justify-between gap-2.5 border-b border-[#2a3440] px-3 py-2.5">
+            <h2 class="m-0 text-xs tracking-normal text-[#91a0b2] uppercase">{{ sidebarPanels.find((panel) => panel.key === activeSidebarPanel)?.label }}</h2>
+            <button type="button" class="size-8 cursor-pointer rounded-md border border-[#c6d0dc] bg-white font-bold text-[#17202a]" title="Collapse sidebar" @click="activeSidebarPanel = null">X</button>
           </header>
 
-          <div v-if="activeSidebarPanel === 'logs'" class="sidebar-panel-body">
-            <pre ref="logsEl" class="terminal-log" @scroll="onLogsScroll">{{ runLogs.length ? runLogs.join("\n") : "No command output yet" }}</pre>
+          <div v-if="activeSidebarPanel === 'logs'" class="min-h-0 min-w-0 overflow-auto overscroll-contain px-3 py-2.5">
+            <LogsPanel :logs="runLogs" @scroll="onLogsScroll" />
           </div>
 
-          <div v-else-if="activeSidebarPanel === 'saves'" class="sidebar-panel-body">
-            <ul v-if="savedArtifacts.length" class="artifact-list">
-              <li v-for="artifact in savedArtifacts" :key="artifact.artifact_id">
-                <a :href="artifactUrl(artifact)">{{ artifact.path }}</a>
-                <span>{{ artifact.payload_type }} · {{ artifact.item_count }}</span>
-              </li>
-            </ul>
-            <p v-else>No saved results yet</p>
+          <div v-else-if="activeSidebarPanel === 'saves'" class="min-h-0 min-w-0 overflow-auto overscroll-contain px-3 py-2.5">
+            <SavesPanel :artifacts="savedArtifacts" :artifact-url="artifactUrl" />
           </div>
 
-          <div v-else-if="activeSidebarPanel === 'nodes'" class="sidebar-panel-body node-browser">
-            <button v-for="spec in nodeSpecs.filter((item) => !item.hidden)" :key="spec.type" type="button" :style="{ '--node-browser-color': specPrimaryColor(spec) }" @click="addNodeFromSidebar(spec.type)">
-              <strong>{{ spec.title }}</strong>
-              <span>{{ spec.category }}</span>
-            </button>
+          <div v-else-if="activeSidebarPanel === 'nodes'" class="min-h-0 min-w-0 overflow-auto overscroll-contain px-3 py-2.5">
+            <NodeBrowser :node-specs="nodeSpecs" :color-for-spec="specPrimaryColor" @add-node="addNodeFromSidebar" />
           </div>
 
-          <div v-else-if="activeSidebarPanel === 'issues'" class="sidebar-panel-body">
-            <ul v-if="validationErrors.length" class="issue-list">
-              <li v-for="(error, index) in validationErrors" :key="`${error.code ?? 'error'}-${index}`">
-                <strong>{{ error.code ?? "ERROR" }}</strong>
-                <span>{{ error.node_type || error.node_id ? `${error.node_type ?? "node"} ${error.node_id ?? ""}` : "" }}</span>
-                <p>{{ error.message ?? "Unknown error" }}</p>
-                <small v-if="formatErrorDetails(error)">{{ formatErrorDetails(error) }}</small>
-              </li>
-            </ul> 
-            <p v-else>No issues</p>
+          <div v-else-if="activeSidebarPanel === 'issues'" class="min-h-0 min-w-0 overflow-auto overscroll-contain px-3 py-2.5">
+            <IssuesPanel :errors="validationErrors" :format-details="formatErrorDetails" />
           </div>
         </section>
       </aside>
 
-      <section class="canvas-panel" aria-label="Workflow canvas">
+      <section class="canvas-panel relative min-h-0 min-w-0" aria-label="Workflow canvas">
         <ClientOnly>
           <BaklavaEditor :view-model="baklava">
             <template #connection="{ connection }">
@@ -1738,1014 +1495,77 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="viewerModal.open" class="modal-backdrop" @click.self="closeViewer">
-      <section class="viewer-modal" aria-label="3D selector">
-        <header class="viewer-modal-header">
+    <div v-if="viewerModal.open" class="fixed inset-0 z-50 grid place-items-center bg-[rgba(15,22,31,0.62)] p-6" @click.self="closeViewer">
+      <section class="max-h-[min(760px,calc(100vh_-_48px))] w-[min(920px,100%)] overflow-auto rounded-lg border border-[#cfd8e3] bg-white p-3.5 shadow-[0_22px_70px_rgba(0,0,0,0.25)]" aria-label="3D selector">
+        <header class="flex items-start justify-between gap-4">
           <div>
-            <p>{{ viewerModal.mode }}</p>
-            <h2>{{ viewerModal.title }}</h2>
+            <p class="m-0 text-xs font-extrabold text-[#176f5d] uppercase">{{ viewerModal.mode }}</p>
+            <h2 class="m-0 text-xl tracking-normal">{{ viewerModal.title }}</h2>
           </div>
-          <button type="button" class="icon-button" title="Close viewer" @click="closeViewer">X</button>
+          <button type="button" class="size-8 cursor-pointer rounded-md border border-[#c6d0dc] bg-white font-bold text-[#17202a]" title="Close viewer" @click="closeViewer">X</button>
         </header>
-        <div class="viewer-controls">
-          <label v-if="viewerModal.mode !== 'score'">
+        <div class="my-3 flex flex-wrap items-end gap-2 max-md:grid">
+          <label v-if="viewerModal.mode !== 'score'" class="grid min-w-[180px] gap-1.5 text-xs font-bold text-[#596575]">
             File
-            <select v-model.number="viewerModal.fileIndex">
+            <select v-model.number="viewerModal.fileIndex" class="h-[34px] rounded-md border border-[#c7d0dc] bg-white text-[#17202a]">
               <option v-for="(file, index) in modalFiles" :key="file.name + index" :value="index">{{ file.name }}</option>
             </select>
           </label>
-          <label v-if="viewerModal.mode !== 'score'">
+          <label v-if="viewerModal.mode !== 'score'" class="grid min-w-[180px] gap-1.5 text-xs font-bold text-[#596575]">
             Style
-            <select v-model="viewerModal.style">
+            <select v-model="viewerModal.style" class="h-[34px] rounded-md border border-[#c7d0dc] bg-white text-[#17202a]">
               <option value="cartoon">Cartoon</option>
               <option value="stick">Stick</option>
               <option value="surface">Surface</option>
             </select>
           </label>
-          <label v-if="viewerModal.mode === 'atom' || viewerModal.mode === 'residue' || viewerModal.mode === 'chain'" class="selector-value">
+          <label v-if="viewerModal.mode === 'atom' || viewerModal.mode === 'residue' || viewerModal.mode === 'chain'" class="grid min-w-[180px] gap-1.5 text-xs font-bold text-[#596575]">
             Selection
             <input
+              class="h-[34px] rounded-md border border-[#c7d0dc] bg-white text-[#17202a]"
               :value="selectorValue()"
               spellcheck="false"
               @input="setSelectorValue(($event.target as HTMLInputElement).value)"
             />
           </label>
-          <div v-if="canBulkSelectAtoms" class="selector-actions">
-            <button type="button" class="connect-button" @click="selectAllAtomsInViewer">Select all</button>
-            <button type="button" class="connect-button" @click="clearSelectorSelection">Clear all</button>
+          <div v-if="canBulkSelectAtoms" class="grid grid-cols-[repeat(2,max-content)] gap-1.5 self-end">
+            <button type="button" class="h-8 cursor-pointer rounded-md border border-[#c6d0dc] bg-white px-3 font-bold text-[#17202a]" @click="selectAllAtomsInViewer">Select all</button>
+            <button type="button" class="h-8 cursor-pointer rounded-md border border-[#c6d0dc] bg-white px-3 font-bold text-[#17202a]" @click="clearSelectorSelection">Clear all</button>
           </div>
-          <label v-if="viewerModal.mode === 'proteinAtom'" class="selector-value">
+          <label v-if="viewerModal.mode === 'proteinAtom'" class="grid min-w-[180px] gap-1.5 text-xs font-bold text-[#596575]">
             Selection
             <textarea
+              class="min-h-[76px] resize-y rounded-md border border-[#c7d0dc] bg-white px-2 py-1.5 font-mono text-xs text-[#17202a]"
               :value="selectorValue()"
               spellcheck="false"
               @input="setSelectorValue(($event.target as HTMLTextAreaElement).value)"
             />
           </label>
-          <div v-if="pendingRunInput?.fields.includes('metric')" class="score-selector-block">
-            <label class="selector-value">
+          <div v-if="pendingRunInput?.fields.includes('metric')" class="grid min-w-[180px] gap-1.5">
+            <label class="grid min-w-[180px] gap-1.5 text-xs font-bold text-[#596575]">
               Score
-              <select :value="runtimeChoiceValue('metric')" @change="setRuntimeChoiceValue('metric', ($event.target as HTMLSelectElement).value)">
+              <select class="h-[34px] rounded-md border border-[#c7d0dc] bg-white text-[#17202a]" :value="runtimeChoiceValue('metric')" @change="setRuntimeChoiceValue('metric', ($event.target as HTMLSelectElement).value)">
                 <option v-for="choice in pendingRunInput.choices.metric ?? []" :key="choice" :value="choice">{{ choice }}</option>
               </select>
             </label>
-            <button type="button" class="run-button" @click="submitRuntimeInput">Submit</button>
+            <button type="button" class="h-8 w-full cursor-pointer rounded-md border border-[#176f5d] bg-[#176f5d] px-4 font-bold text-white" @click="submitRuntimeInput">Submit</button>
           </div>
-          <div v-if="isChiralityTargetMode()" class="chirality-targets">
-            <div v-for="target in parseChiralityTargets()" :key="target.atom" class="chirality-target">
+          <div v-if="isChiralityTargetMode()" class="flex max-w-[420px] flex-wrap items-center gap-1.5">
+            <div v-for="target in parseChiralityTargets(selectorValue())" :key="target.atom" class="inline-flex items-center gap-1 rounded-md border border-[#d9b56d] bg-[#fff8e8] py-0.5 pr-1 pl-2 text-xs font-bold text-[#2d261a]">
               <span>{{ target.atom }}</span>
-              <select :value="target.chirality" @change="setChiralityTarget(target.atom, ($event.target as HTMLSelectElement).value)">
+              <select class="h-[26px] w-[52px] rounded-md border border-[#c7d0dc] bg-white text-[#17202a]" :value="target.chirality" @change="setChiralityTarget(target.atom, ($event.target as HTMLSelectElement).value)">
                 <option value="R">R</option>
                 <option value="S">S</option>
               </select>
-              <button type="button" class="icon-button" title="Remove target" @click="removeChiralityTarget(target.atom)">X</button>
+              <button type="button" class="size-6 cursor-pointer rounded-md border border-[#c6d0dc] bg-white font-bold text-[#17202a]" title="Remove target" @click="removeChiralityTarget(target.atom)">X</button>
             </div>
           </div>
-          <button v-if="pendingRunInput && !pendingRunInput.fields.includes('metric')" type="button" class="run-button" @click="submitRuntimeInput">Submit</button>
-          <button v-else-if="viewerModal.mode === 'residue'" type="button" class="run-button" @click="submitViewerSelection">Submit</button>
+          <button v-if="pendingRunInput && !pendingRunInput.fields.includes('metric')" type="button" class="h-8 cursor-pointer rounded-md border border-[#176f5d] bg-[#176f5d] px-4 font-bold text-white" @click="submitRuntimeInput">Submit</button>
+          <button v-else-if="viewerModal.mode === 'residue'" type="button" class="h-8 cursor-pointer rounded-md border border-[#176f5d] bg-[#176f5d] px-4 font-bold text-white" @click="submitViewerSelection">Submit</button>
         </div>
-        <div v-show="viewerModal.mode !== 'score'" ref="viewerEl" class="viewer-surface" />
-        <p v-if="activeModalFile?.type === 'fasta'" class="sequence-preview">{{ activeModalFile.content || "No sequence content loaded." }}</p>
+        <div v-show="viewerModal.mode !== 'score'" ref="viewerEl" class="relative h-[520px] w-full rounded-lg border border-[#d5dde6] bg-white max-md:h-[380px]" />
+        <p v-if="activeModalFile?.type === 'fasta'" class="mt-3 whitespace-pre-wrap rounded-lg bg-[#f4f7fa] p-3 text-[#26313f]">{{ activeModalFile.content || "No sequence content loaded." }}</p>
       </section>
     </div>
   </main>
 </template>
-
-<style>
-.workbench-shell {
-  height: 100vh;
-  overflow: hidden;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  background: #171d25;
-}
-
-.topbar {
-  display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  border-bottom: 1px solid #ccd4dd;
-  background: #fbfcfd;
-  padding: 10px 16px;
-}
-
-.topbar h1,
-.topbar p,
-.viewer-modal h2,
-.viewer-modal p {
-  margin: 0;
-}
-
-.topbar h1 {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.brand-block {
-  min-width: 96px;
-}
-
-.topbar p {
-  margin-top: 2px;
-  color: #566271;
-  font-size: 12px;
-}
-
-.topbar-actions,
-.viewer-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.topbar-actions {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.top-run-status {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(80px, max-content) auto auto minmax(120px, 1fr);
-  align-items: center;
-  gap: 8px;
-  color: #344052;
-  font-size: 12px;
-}
-
-.run-id,
-.run-message {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.run-id,
-.run-percent,
-.run-count {
-  color: #566271;
-  font-weight: 700;
-}
-
-.run-message {
-  color: #17202a;
-}
-
-.top-progress-track {
-  grid-column: 1 / -1;
-  width: 100%;
-  height: 5px;
-  overflow: hidden;
-  border-radius: 4px;
-  background: #dbe3ec;
-}
-
-.api-base {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #566271;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.api-base input {
-  width: 190px;
-  height: 32px;
-  border: 1px solid #c6d0dc;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #17202a;
-  padding: 0 8px;
-}
-
-.load-workflow-menu {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-}
-
-.load-workflow-menu .icon-button {
-  border-radius: 6px 0 0 6px;
-}
-
-.load-workflow-menu select {
-  width: 92px;
-  height: 32px;
-  border: 1px solid #c6d0dc;
-  border-left: 0;
-  border-radius: 0 6px 6px 0;
-  background: #ffffff;
-  color: #17202a;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.doc-link,
-.icon-button,
-.run-button,
-.stop-button,
-.connect-button {
-  border: 1px solid #c6d0dc;
-  background: #ffffff;
-  color: #17202a;
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.connect-button {
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 6px;
-  font-weight: 700;
-}
-
-.connect-button:disabled {
-  cursor: progress;
-  opacity: 0.65;
-}
-
-.api-feedback {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #667386;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.api-feedback.available {
-  color: #176f5d;
-}
-
-.api-feedback.unavailable {
-  color: #b33939;
-}
-
-.session-chip {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #566271;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.doc-link {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 6px;
-  font-weight: 700;
-}
-
-.icon-button {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  font-weight: 700;
-}
-
-.run-button {
-  height: 32px;
-  padding: 0 16px;
-  border-radius: 6px;
-  background: #176f5d;
-  border-color: #176f5d;
-  color: #ffffff;
-  font-weight: 700;
-}
-
-.stop-button {
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 6px;
-  background: #a8343d;
-  border-color: #a8343d;
-  color: #ffffff;
-  font-weight: 700;
-}
-
-.run-button:disabled {
-  opacity: 0.62;
-  cursor: wait;
-}
-
-.workflow-file-input {
-  display: none;
-}
-
-.run-state {
-  padding: 4px 8px;
-  border-radius: 5px;
-  background: #12372f;
-  color: #7ee0c4;
-  font-weight: 700;
-}
-
-.run-state.error {
-  background: #4a1d22;
-  color: #ff9c9c;
-}
-
-.run-state.stopped {
-  background: #3b3340;
-  color: #d8b6ff;
-}
-
-.workspace-body {
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-  overflow: hidden;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.canvas-panel {
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-}
-
-.left-sidebar {
-  position: absolute;
-  inset: 0 auto 0 0;
-  z-index: 12;
-  width: 48px;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 48px 0;
-  border-right: 1px solid #2a3440;
-  background: #101720;
-  color: #d8e1ec;
-  transition: grid-template-columns 180ms ease;
-}
-
-.left-sidebar.expanded {
-  width: min(388px, 100%);
-  grid-template-columns: 48px minmax(280px, 340px);
-}
-
-.sidebar-tabs {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  padding: 10px 7px;
-  border-right: 1px solid #2a3440;
-}
-
-.sidebar-tab {
-  width: 34px;
-  height: 42px;
-  place-items: center;
-  align-content: center;
-  gap: 1px;
-  border: 1px solid #334154;
-  border-radius: 6px;
-  background: #182231;
-  color: #d8e1ec;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.sidebar-tab small {
-  display: block;
-  font-size: 7px;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: 0;
-}
-
-.sidebar-tab.active {
-  border-color: #2ca58d;
-  background: #12372f;
-  color: #7ee0c4;
-}
-
-.sidebar-panel {
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  background: #151c25;
-}
-
-.sidebar-panel > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 10px 12px;
-  border-bottom: 1px solid #2a3440;
-}
-
-.sidebar-panel > header h2 {
-  margin: 0;
-  font-size: 12px;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  color: #91a0b2;
-}
-
-.sidebar-panel-body {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 10px 12px;
-}
-
-.sidebar-panel-body p {
-  margin: 0;
-}
-
-.sidebar-panel-body p,
-.sidebar-panel-body li,
-.sidebar-panel-body pre {
-  font-size: 12px;
-}
-
-.progress-track {
-  width: 100%;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 4px;
-  background: #2b3542;
-  margin-bottom: 8px;
-}
-
-.progress-fill {
-  height: 100%;
-  min-width: 0;
-  background: #2ca58d;
-  transition: width 180ms ease;
-}
-
-.archive-link,
-.artifact-list a {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #7ee0c4;
-  text-decoration: none;
-}
-
-.archive-link {
-  padding: 4px 8px;
-  border-radius: 5px;
-  background: #176f5d;
-  color: #ffffff;
-  font-weight: 800;
-}
-
-.node-browser {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  overflow: auto;
-}
-
-.node-browser button {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  min-height: 48px;
-  padding: 8px 10px;
-  border: 1px solid #334154;
-  border-left: 4px solid var(--node-browser-color, #2ca58d);
-  border-radius: 6px;
-  background: #1a2533;
-  color: #e8f0f8;
-  text-align: left;
-  cursor: pointer;
-}
-
-.node-browser button:hover {
-  border-color: color-mix(in srgb, var(--node-browser-color, #7ee0c4), white 18%);
-  border-left-color: var(--node-browser-color, #7ee0c4);
-}
-
-.node-browser strong {
-  font-size: 12px;
-}
-
-.node-browser span {
-  color: #91a0b2;
-  font-size: 11px;
-}
-
-.archive-link.error {
-  background: #b33939;
-  color: #ffffff;
-}
-
-.archive-link.stopped {
-  background: #6d4b8d;
-  color: #ffffff;
-}
-
-.download-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1;
-}
-
-.error-label {
-  color: #ff9c9c;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.stopped-label {
-  color: #d8b6ff;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.issue-list,
-.artifact-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.issue-list li,
-.artifact-list li {
-  display: grid;
-  gap: 3px;
-}
-
-.issue-list strong {
-  color: #ffb86b;
-}
-
-.issue-list span,
-.artifact-list span {
-  color: #91a0b2;
-  font-size: 11px;
-}
-
-.issue-list small {
-  color: #ffd7a8;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.terminal-log {
-  min-height: 160px;
-  height: 100%;
-  max-height: none;
-  overflow: auto;
-  overscroll-behavior: contain;
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid #273342;
-  border-radius: 6px;
-  background: #05080d;
-  white-space: pre-wrap;
-  color: #8ef0bd;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  box-shadow: inset 0 0 0 1px rgba(126, 224, 196, 0.05);
-}
-
-.canvas-panel > div,
-.canvas-panel .baklava-editor {
-  width: 100%;
-  height: 100%;
-}
-
-.baklava-node-palette {
-  display: none !important;
-}
-
-.baklava-toolbar {
-  flex-direction: row-reverse !important;
-}
-
-.baklava-minimap {
-  margin-top: 60px !important;
-}
-
-.baklava-context-menu {
-  width: max-content !important;
-  min-width: 220px;
-  max-width: none !important;
-  max-height: none !important;
-  overflow: visible !important;
-  border: 1px solid rgba(190, 207, 226, 0.24);
-  border-radius: 8px !important;
-}
-
-.baklava-context-menu > .item {
-  min-height: 30px;
-  border-left: 4px solid #6d7681;
-  white-space: nowrap;
-}
-
-.baklava-context-menu > .item > .__label {
-  white-space: nowrap;
-}
-
-.baklava-context-menu > .item:nth-of-type(6n + 1) {
-  border-left-color: #249a86;
-}
-
-.baklava-context-menu > .item:nth-of-type(6n + 2) {
-  border-left-color: #c74b67;
-}
-
-.baklava-context-menu > .item:nth-of-type(6n + 3) {
-  border-left-color: #7d8b23;
-}
-
-.baklava-context-menu > .item:nth-of-type(6n + 4) {
-  border-left-color: #9062ce;
-}
-
-.baklava-context-menu > .item:nth-of-type(6n + 5) {
-  border-left-color: #d28a19;
-}
-
-.baklava-context-menu > .item:nth-of-type(6n) {
-  border-left-color: #e2559b;
-}
-
-@media (max-height: 760px), (max-width: 900px) {
-  .baklava-context-menu:not(.--nested) {
-    min-width: min(560px, calc(100vw - 32px));
-    column-count: 2;
-    column-gap: 0;
-    column-fill: balance;
-  }
-
-  .baklava-context-menu:not(.--nested) > .item,
-  .baklava-context-menu:not(.--nested) > .divider {
-    break-inside: avoid;
-  }
-}
-
-.baklava-node {
-  border-top: 3px solid var(--foundry-node-color, #6d7681);
-}
-
-.baklava-node-interface .__port {
-  background: var(--foundry-port-color, #6d7681) !important;
-  border-color: color-mix(in srgb, var(--foundry-port-color, #6d7681), white 30%) !important;
-}
-
-.typed-connection .baklava-connection {
-  stroke: var(--connection-color, #6d7681) !important;
-}
-
-.baklava-node.foundry-node-error {
-  border-top-color: #ff5252 !important;
-  box-shadow: 0 0 0 2px rgba(255, 82, 82, 0.75);
-}
-
-.baklava-node.foundry-node-cached {
-  box-shadow: 0 0 0 2px rgba(126, 224, 196, 0.72);
-}
-
-.baklava-node.foundry-node-cached::before {
-  content: "cached";
-  position: absolute;
-  top: 4px;
-  right: 34px;
-  z-index: 1;
-  color: #7ee0c4;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.baklava-node.foundry-node-cached.foundry-node-manual::before,
-.baklava-node.foundry-node-cached.foundry-node-pending-input::before {
-  top: 19px;
-}
-
-.baklava-node.foundry-node-manual {
-  border-style: dashed;
-  box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.55);
-}
-
-.baklava-node.foundry-node-manual::after {
-  content: "manual";
-  position: absolute;
-  top: 4px;
-  right: 34px;
-  z-index: 1;
-  color: #ffb86b;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.baklava-node.foundry-node-pending-input {
-  animation: foundryPendingInput 0.9s ease-in-out infinite;
-  border-top-color: #ffb86b !important;
-}
-
-.baklava-node.foundry-node-pending-input::after {
-  content: "input";
-  color: #ffd29a;
-}
-
-@keyframes foundryPendingInput {
-  0%,
-  100% {
-    box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.55), 0 0 0 1px rgba(255, 184, 107, 0.2);
-  }
-
-  50% {
-    box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.9), 0 0 0 4px rgba(255, 184, 107, 0.38), 0 0 18px rgba(255, 184, 107, 0.45);
-  }
-}
-
-.node-file-upload {
-  display: grid;
-  gap: 5px;
-  padding: 8px;
-}
-
-.node-file-upload.--hidden {
-  color: #8f9aaa;
-  font-size: 12px;
-}
-
-.node-file-upload span {
-  color: #d7dee8;
-  font-size: 12px;
-}
-
-.node-text-control {
-  display: grid;
-  gap: 5px;
-  padding: 8px;
-}
-
-.node-text-control span {
-  color: #d7dee8;
-  font-size: 12px;
-}
-
-.node-text-control input {
-  width: 100%;
-  height: 30px;
-  border: 1px solid #536176;
-  border-radius: 5px;
-  background: #17202a;
-  color: #eef4fb;
-  padding: 0 7px;
-}
-
-.node-file-upload input {
-  width: 100%;
-  color: #d7dee8;
-  font-size: 12px;
-}
-
-.node-file-upload small {
-  color: #7ee0c4;
-}
-
-.node-viewer-button {
-  width: calc(100% - 16px);
-  min-height: 30px;
-  margin: 6px 8px;
-  border: 1px solid #64758b;
-  border-radius: 6px;
-  background: #273242;
-  color: #eef4fb;
-  cursor: pointer;
-}
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(15, 22, 31, 0.62);
-}
-
-.viewer-modal {
-  width: min(920px, 100%);
-  max-height: min(760px, calc(100vh - 48px));
-  overflow: auto;
-  border: 1px solid #cfd8e3;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.25);
-  padding: 14px;
-}
-
-.viewer-modal-header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.viewer-modal-header p {
-  color: #176f5d;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.viewer-modal-header h2 {
-  font-size: 20px;
-  letter-spacing: 0;
-}
-
-.viewer-controls {
-  margin: 12px 0;
-  flex-wrap: wrap;
-}
-
-.viewer-controls label {
-  display: grid;
-  gap: 5px;
-  min-width: 180px;
-  color: #596575;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.viewer-controls select,
-.viewer-controls input,
-.viewer-controls textarea {
-  height: 34px;
-  border: 1px solid #c7d0dc;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #17202a;
-}
-
-.selector-actions,
-.score-selector-block {
-  display: grid;
-  gap: 6px;
-}
-
-.selector-actions {
-  grid-template-columns: repeat(2, max-content);
-  align-self: end;
-}
-
-.score-selector-block {
-  min-width: 180px;
-}
-
-.score-selector-block .run-button {
-  width: 100%;
-}
-
-.viewer-controls textarea {
-  min-height: 76px;
-  resize: vertical;
-  padding: 7px 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-}
-
-.chirality-targets {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-width: 420px;
-}
-
-.chirality-target {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 4px 3px 8px;
-  border: 1px solid #d9b56d;
-  border-radius: 6px;
-  background: #fff8e8;
-  color: #2d261a;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.chirality-target select {
-  width: 52px;
-  height: 26px;
-}
-
-.chirality-target .icon-button {
-  width: 24px;
-  height: 24px;
-}
-
-.viewer-surface {
-  width: 100%;
-  height: 520px;
-  border: 1px solid #d5dde6;
-  border-radius: 7px;
-  background: #ffffff;
-  position: relative;
-}
-
-.sequence-preview {
-  white-space: pre-wrap;
-  margin-top: 12px;
-  padding: 12px;
-  border-radius: 7px;
-  background: #f4f7fa;
-  color: #26313f;
-}
-
-@media (max-width: 760px) {
-  .workbench-shell {
-    grid-template-rows: auto minmax(520px, 1fr);
-  }
-
-  .topbar {
-    align-items: start;
-    gap: 10px;
-    padding: 10px 12px;
-    grid-template-columns: 1fr;
-  }
-
-  .top-run-status {
-    width: 100%;
-    grid-template-columns: auto minmax(80px, 1fr) auto auto;
-  }
-
-  .run-message {
-    grid-column: 1 / -1;
-  }
-
-  .workspace-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .left-sidebar {
-    width: 42px;
-    grid-template-columns: 42px 0;
-  }
-
-  .left-sidebar.expanded {
-    width: min(100%, 392px);
-    grid-template-columns: 42px minmax(250px, calc(100vw - 42px));
-  }
-
-  .sidebar-tabs {
-    padding: 8px 4px;
-  }
-
-  .sidebar-tab {
-    width: 64px;
-    height: 42px;
-  }
-
-  .viewer-controls {
-    display: grid;
-  }
-
-  .topbar-actions {
-    width: 100%;
-  }
-
-  .topbar-actions {
-    flex-wrap: wrap;
-  }
-
-  .api-base {
-    flex: 1 1 220px;
-  }
-
-  .api-base input {
-    width: 100%;
-  }
-
-  .viewer-surface {
-    height: 380px;
-  }
-}
-</style>

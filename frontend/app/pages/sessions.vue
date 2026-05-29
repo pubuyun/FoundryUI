@@ -120,166 +120,38 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="sessions-page">
-    <header class="sessions-header">
+  <main class="min-h-screen bg-[#f5f7fa] text-[#17202a]">
+    <header class="flex items-center justify-between gap-5 border-b border-[#ccd4dd] bg-white px-5 py-4 max-md:flex-col max-md:items-stretch">
       <div>
-        <h1>Sessions</h1>
-        <p>Open an existing session or create a clean workspace.</p>
+        <h1 class="m-0 text-[22px] font-bold tracking-normal">Sessions</h1>
+        <p class="m-0 text-[13px] text-[#5b6878]">Open an existing session or create a clean workspace.</p>
       </div>
-      <nav class="sessions-actions">
-        <label>
+      <nav class="flex items-center gap-2 max-md:flex-wrap">
+        <label class="flex items-center gap-1.5 text-xs font-bold text-[#566271]">
           API
-          <input v-model="apiBase" placeholder="http://127.0.0.1:3000/api" spellcheck="false" @keyup.enter="connectApi" />
+          <input v-model="apiBase" class="h-[34px] w-[210px] rounded-md border border-[#c6d0dc] px-2" placeholder="http://127.0.0.1:3000/api" spellcheck="false" @keyup.enter="connectApi" />
         </label>
-        <button type="button" class="secondary-button" :disabled="apiStatus === 'checking'" @click="connectApi">
+        <button type="button" class="inline-flex h-[34px] cursor-pointer items-center rounded-md border border-[#c6d0dc] bg-white px-3 font-bold text-[#17202a] no-underline" :disabled="apiStatus === 'checking'" @click="connectApi">
           {{ apiStatus === "checking" ? "Checking" : "Connect" }}
         </button>
-        <NuxtLink class="secondary-button" to="/">Workbench</NuxtLink>
-        <button type="button" class="primary-button" @click="createSession">New Session</button>
+        <NuxtLink class="inline-flex h-[34px] cursor-pointer items-center rounded-md border border-[#c6d0dc] bg-white px-3 font-bold text-[#17202a] no-underline" to="/">Workbench</NuxtLink>
+        <button type="button" class="inline-flex h-[34px] cursor-pointer items-center rounded-md border border-[#176f5d] bg-[#176f5d] px-3 font-bold text-white no-underline" @click="createSession">New Session</button>
       </nav>
     </header>
 
-    <section class="sessions-list" aria-label="Existing sessions">
-      <p v-if="message">{{ message }}</p>
-      <article v-for="session in sessions" :key="session.session_id" class="session-row">
+    <section class="grid max-w-[980px] gap-2.5 px-5 py-4" aria-label="Existing sessions">
+      <p v-if="message" class="m-0">{{ message }}</p>
+      <article v-for="session in sessions" :key="session.session_id" class="flex items-center justify-between gap-4 rounded-lg border border-[#d4dde8] bg-white p-3.5 max-md:flex-col max-md:items-stretch">
         <div>
-          <h2>{{ session.session_id }}</h2>
-          <p>Updated {{ new Date(session.updated_at).toLocaleString() }}</p>
-          <p v-if="session.latest_run_id">Latest run {{ session.latest_run_id }}</p>
+          <h2 class="m-0 text-sm font-bold tracking-normal">{{ session.session_id }}</h2>
+          <p class="m-0 text-[13px] text-[#5b6878]">Updated {{ new Date(session.updated_at).toLocaleString() }}</p>
+          <p v-if="session.latest_run_id" class="m-0 text-[13px] text-[#5b6878]">Latest run {{ session.latest_run_id }}</p>
         </div>
-        <div class="session-row-actions">
-          <NuxtLink class="secondary-button" :to="sessionUrl(session.session_id)">Open</NuxtLink>
-          <button type="button" class="danger-button" @click="deleteSession(session.session_id)">Delete</button>
+        <div class="flex items-center gap-2 max-md:flex-wrap">
+          <NuxtLink class="inline-flex h-[34px] cursor-pointer items-center rounded-md border border-[#c6d0dc] bg-white px-3 font-bold text-[#17202a] no-underline" :to="sessionUrl(session.session_id)">Open</NuxtLink>
+          <button type="button" class="inline-flex h-[34px] cursor-pointer items-center rounded-md border border-[#a8343d] bg-[#a8343d] px-3 font-bold text-white no-underline" @click="deleteSession(session.session_id)">Delete</button>
         </div>
       </article>
     </section>
   </main>
 </template>
-
-<style>
-.sessions-page {
-  min-height: 100vh;
-  background: #f5f7fa;
-  color: #17202a;
-}
-
-.sessions-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  border-bottom: 1px solid #ccd4dd;
-  background: #ffffff;
-  padding: 18px 22px;
-}
-
-.sessions-header h1,
-.sessions-header p,
-.session-row h2,
-.session-row p,
-.sessions-list p {
-  margin: 0;
-}
-
-.sessions-header h1 {
-  font-size: 22px;
-  letter-spacing: 0;
-}
-
-.sessions-header p,
-.session-row p {
-  color: #5b6878;
-  font-size: 13px;
-}
-
-.sessions-actions,
-.session-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sessions-actions label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #566271;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.sessions-actions input {
-  width: 210px;
-  height: 34px;
-  border: 1px solid #c6d0dc;
-  border-radius: 6px;
-  padding: 0 8px;
-}
-
-.sessions-list {
-  display: grid;
-  gap: 10px;
-  max-width: 980px;
-  padding: 18px 22px;
-}
-
-.session-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border: 1px solid #d4dde8;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 14px;
-}
-
-.session-row h2 {
-  font-size: 14px;
-  letter-spacing: 0;
-}
-
-.primary-button,
-.secondary-button,
-.danger-button {
-  display: inline-flex;
-  height: 34px;
-  align-items: center;
-  border-radius: 6px;
-  padding: 0 12px;
-  font-weight: 700;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.primary-button {
-  border: 1px solid #176f5d;
-  background: #176f5d;
-  color: #ffffff;
-}
-
-.secondary-button {
-  border: 1px solid #c6d0dc;
-  background: #ffffff;
-  color: #17202a;
-}
-
-.danger-button {
-  border: 1px solid #a8343d;
-  background: #a8343d;
-  color: #ffffff;
-}
-
-@media (max-width: 760px) {
-  .sessions-header,
-  .session-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .sessions-actions,
-  .session-row-actions {
-    flex-wrap: wrap;
-  }
-}
-</style>
