@@ -14,6 +14,7 @@
 
 .baklava-minimap {
   margin-top: 60px !important;
+  z-index: 50 !important;
 }
 
 .baklava-context-menu {
@@ -96,21 +97,33 @@
   box-shadow: 0 0 0 2px rgba(126, 224, 196, 0.72);
 }
 
-.baklava-node.foundry-node-cached::before {
-  content: "cached";
+.baklava-node .foundry-cache-clear-button {
   position: absolute;
   top: 4px;
   right: 34px;
-  z-index: 1;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #7ee0c4;
   font-size: 10px;
   font-weight: 800;
+  line-height: 1;
   letter-spacing: 0;
   text-transform: uppercase;
+  cursor: pointer;
+  font-family: inherit;
 }
 
-.baklava-node.foundry-node-cached.foundry-node-manual::before,
-.baklava-node.foundry-node-cached.foundry-node-pending-input::before {
+.baklava-node .foundry-cache-clear-button:hover,
+.baklava-node .foundry-cache-clear-button:focus-visible {
+  color: #b8ffe9;
+  text-decoration: underline;
+  outline: none;
+}
+
+.baklava-node.foundry-node-cached.foundry-node-manual .foundry-cache-clear-button,
+.baklava-node.foundry-node-cached.foundry-node-pending-input .foundry-cache-clear-button {
   top: 19px;
 }
 
@@ -151,4 +164,8 @@
   50% {
     box-shadow: inset 0 0 0 1px rgba(255, 184, 107, 0.9), 0 0 0 4px rgba(255, 184, 107, 0.38), 0 0 18px rgba(255, 184, 107, 0.45);
   }
+}
+
+button[title="Create Subgraph"] {
+  display: none;
 }

@@ -169,6 +169,13 @@ class RunRegistry:
         record = self.records[run_id]
         record.node_cache_keys[node_id] = cache_key
 
+    async def clear_node_cache_key(self, run_id: str, node_id: str) -> bool:
+        record = self.records.get(run_id)
+        if record is None:
+            return False
+        async with self._lock:
+            return record.node_cache_keys.pop(node_id, None) is not None
+
     async def request_node_input(self, run_id: str, node_id: str, node_type: str, fields: list[str], payloads: dict[str, Any], defaults: dict[str, Any], choices: dict[str, list[str]] | None = None) -> dict[str, Any]:
         record = self.records[run_id]
         future: Future[dict[str, Any]] = Future()

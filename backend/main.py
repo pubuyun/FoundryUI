@@ -290,6 +290,23 @@ async def delete_session(session_id: str):
     return {"deleted": True}
 
 
+@app.delete("/api/sessions/{session_id}/cache/{node_id}")
+async def clear_session_node_cache(session_id: str, node_id: str):
+    record = session_store.get(session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    cleared = False
+    if record.latest_run_id:
+        cleared = await run_registry.clear_node_cache_key(record.latest_run_id, node_id)
+    return {
+        "accepted": True,
+        "session_id": session_id,
+        "node_id": node_id,
+        "previous_run_id": record.latest_run_id,
+        "cleared": cleared,
+    }
+
+
 @app.get("/api/artifacts/{artifact_id}")
 async def download_artifact(artifact_id: str):
     artifact = artifact_store.artifacts.get(artifact_id)

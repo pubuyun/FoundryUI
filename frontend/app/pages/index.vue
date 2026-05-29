@@ -786,6 +786,15 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
   return payload as T;
 }
 
+async function deleteJson<T>(path: string): Promise<T> {
+  const response = await fetch(apiUrl(path), { method: "DELETE" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(readBackendMessage(payload, response.statusText));
+  }
+  return payload as T;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(apiUrl(path));
   const payload = await response.json().catch(() => ({}));
@@ -1077,6 +1086,29 @@ function markNodeCached(nodeId: string) {
   applyNodeRuntimeClasses(nodeId);
 }
 
+async function clearNodeCache(nodeId: string) {
+  if (!currentSessionId.value) {
+    removeNodeCached(nodeId);
+    runMessage.value = "Node cache cleared locally";
+    return;
+  }
+  try {
+    await deleteJson(`/api/sessions/${encodeURIComponent(currentSessionId.value)}/cache/${encodeURIComponent(nodeId)}`);
+    removeNodeCached(nodeId);
+    runMessage.value = "Node cache cleared";
+  } catch (error) {
+    runMessage.value = error instanceof Error ? error.message : "Could not clear node cache";
+  }
+}
+
+function removeNodeCached(nodeId: string) {
+  if (!cachedNodeIds.value.has(nodeId)) return;
+  const next = new Set(cachedNodeIds.value);
+  next.delete(nodeId);
+  cachedNodeIds.value = next;
+  applyNodeRuntimeClasses(nodeId);
+}
+
 function setNodePendingInput(nodeId: string, pending: boolean) {
   const next = new Set(pendingInputNodeIds.value);
   if (pending) {
@@ -1100,6 +1132,34 @@ function applyNodeRuntimeClasses(nodeId: string) {
   el.classList.toggle("foundry-node-pending-input", pendingInputNodeIds.value.has(nodeId));
   el.classList.toggle("foundry-node-error", errorNodeIds.value.has(nodeId));
   el.classList.toggle("foundry-node-cached", cachedNodeIds.value.has(nodeId));
+  syncNodeCacheButton(nodeId);
+}
+
+function syncNodeCacheButton(nodeId: string) {
+  const el = nodeElements.get(nodeId);
+  if (!el) return;
+  const selector = ".foundry-cache-clear-button";
+  let button = el.querySelector<HTMLButtonElement>(selector);
+  if (!cachedNodeIds.value.has(nodeId)) {
+    button?.remove();
+    return;
+  }
+  if (button) return;
+  button = document.createElement("button");
+  button.type = "button";
+  button.className = "foundry-cache-clear-button";
+  button.textContent = "cached";
+  button.title = "Clear node cache";
+  button.setAttribute("aria-label", "Clear node cache");
+  const stop = (event: Event) => event.stopPropagation();
+  button.addEventListener("pointerdown", stop);
+  button.addEventListener("mousedown", stop);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void clearNodeCache(nodeId);
+  });
+  el.appendChild(button);
 }
 
 async function openViewer(nodeId: string, title: string, mode: ViewerModal["mode"]) {
@@ -1394,6 +1454,7 @@ baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
   el.classList.toggle("foundry-node-pending-input", pendingInputNodeIds.value.has(node.id));
   el.classList.toggle("foundry-node-error", errorNodeIds.value.has(node.id));
   el.classList.toggle("foundry-node-cached", cachedNodeIds.value.has(node.id));
+  syncNodeCacheButton(node.id);
   return { node, el };
 });
 
