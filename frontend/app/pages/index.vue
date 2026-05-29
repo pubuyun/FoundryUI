@@ -17,10 +17,8 @@ import {
 import { BaklavaInterfaceTypes, NodeInterfaceType, getType, setType } from "@baklavajs/interface-types";
 import "@baklavajs/themes/dist/syrup-dark.css";
 import {
-  colorsByType,
-  nodeSpecs,
+  type NodeCatalogResponse,
   proteinExample,
-  typeDetails,
   type FoundryNodeSpec,
   type OptionSpec,
   type PortSpec,
@@ -119,6 +117,11 @@ baklava.settings.palette.enabled = false;
 
 const registeredConstructors = new Map<string, ReturnType<typeof defineNode>>();
 const typeRegistry = new Map<PortType, NodeInterfaceType<any>>();
+const nodeSpecs = ref<FoundryNodeSpec[]>([]);
+const typeDetails = ref<Array<{ name: PortType; detail: string; color?: string }>>([]);
+const colorsByType = ref<Record<string, string>>({});
+const typeConversions = ref<Array<{ from: PortType; to: PortType }>>([]);
+const nodeCatalogLoaded = ref(false);
 const uploadedByNode = reactive<Record<string, UploadedStructure[]>>({});
 const DEFAULT_API_BASE = "http://127.0.0.1:3000/api";
 const DEFAULT_WORKFLOW_PRESET = "ligand-binder-denovo.fuiworkflow";
@@ -164,6 +167,7 @@ const viewerModal = reactive<ViewerModal>({
 });
 let viewer: any;
 let viewerZoomKey = "";
+let catalogRegistered = false;
 
 const sidebarPanels: Array<{ key: SidebarPanel; label: string; icon: string }> = [
   { key: "logs", label: "Logs", icon: ">" },
@@ -206,6 +210,7 @@ async function connectApi() {
     }
     localStorage.setItem("foundryui-api-base", normalizedApiBase.value);
     apiBase.value = normalizedApiBase.value;
+    await loadNodeCatalog();
     apiStatus.value = "available";
     apiMessage.value = "API available";
     await ensureSession();
@@ -213,6 +218,18 @@ async function connectApi() {
     apiStatus.value = "unavailable";
     apiMessage.value = error instanceof Error ? error.message : "API unavailable";
   }
+}
+
+async function loadNodeCatalog() {
+  if (nodeCatalogLoaded.value) return;
+  const catalog = await getJson<NodeCatalogResponse>("/api/nodes");
+  typeDetails.value = catalog.types ?? [];
+  colorsByType.value = Object.fromEntries(typeDetails.value.map((type) => [type.name, type.color ?? "#6d7681"]));
+  typeConversions.value = catalog.conversions ?? [];
+  nodeSpecs.value = catalog.nodes ?? [];
+  registerTypes();
+  registerNodes();
+  nodeCatalogLoaded.value = true;
 }
 
 const FileUploadControl = markRaw(
@@ -343,35 +360,28 @@ function createFoundryNode(spec: FoundryNodeSpec) {
 }
 
 function registerTypes() {
+  if (catalogRegistered) return;
   const interfaceTypes = new BaklavaInterfaceTypes(baklava.editor, { viewPlugin: baklava });
-  typeDetails.forEach(({ name }) => {
+  typeDetails.value.forEach(({ name }) => {
     typeRegistry.set(name, new NodeInterfaceType(name));
   });
 
-  typeRegistry.get("Protein")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
-  typeRegistry.get("Ligand")?.addConversion(typeRegistry.get("Batch Ligand")!, (value) => value);
-  typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
-  typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Batch Protein with Ligand")!, (value) => value);
-  typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
-  typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Batch Protein")!, (value) => value);
-  typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
-  typeRegistry.get("Batch Ligand")?.addConversion(typeRegistry.get("Ligand")!, (value) => value);
-  typeRegistry.get("Batch Protein")?.addConversion(typeRegistry.get("Protein")!, (value) => value);
-  typeRegistry.get("Batch Protein with Ligand")?.addConversion(typeRegistry.get("Protein")!, (value) => value);
-  typeRegistry.get("Batch Protein (With Ligand)")?.addConversion(typeRegistry.get("Protein")!, (value) => value);
-  typeRegistry.get("Ligand")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
-  typeRegistry.get("Batch Ligand")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
-  typeRegistry.get("Protein")?.addConversion(typeRegistry.get("Batch Protein (With Ligand)")!, (value) => value);
+  typeConversions.value.forEach((conversion) => {
+    const source = typeRegistry.get(conversion.from);
+    const target = typeRegistry.get(conversion.to);
+    if (source && target) source.addConversion(target, (value) => value);
+  });
 
   interfaceTypes.addTypes(...typeRegistry.values());
 }
 
 function registerNodes() {
-  nodeSpecs.forEach((spec) => {
+  nodeSpecs.value.forEach((spec) => {
     const nodeConstructor = createFoundryNode(spec);
     registeredConstructors.set(spec.type, nodeConstructor);
     baklava.editor.registerNodeType(nodeConstructor, { category: spec.category, title: spec.title });
   });
+  catalogRegistered = true;
 }
 
 function toggleSidebarPanel(panel: SidebarPanel) {
@@ -398,7 +408,7 @@ function specPrimaryColor(spec: FoundryNodeSpec) {
 }
 
 function portColor(typeName: string | undefined) {
-  return typeName ? colorsByType[typeName as PortType] ?? "#6d7681" : "#6d7681";
+  return typeName ? colorsByType.value[typeName] ?? "#6d7681" : "#6d7681";
 }
 
 function primaryNodeColor(node: AbstractNode) {
@@ -411,6 +421,24 @@ function nodeRequiresRuntimeInput(node: AbstractNode) {
   return Boolean(specForNode(node)?.requiresRuntimeInput);
 }
 
+function uiForNode(node: AbstractNode | undefined) {
+  return node ? specForNode(node)?.ui ?? {} : {};
+}
+
+function runtimeViewerMode(node: AbstractNode | undefined, event: RunEventPayload): ViewerModal["mode"] {
+  const uiMode = uiForNode(node).viewerMode;
+  if (uiMode) return uiMode as ViewerModal["mode"];
+  return event.node_type === "ResidueSelector"
+    ? "residue"
+    : event.node_type === "ProteinAtomSelector" || event.node_type === "ResidueAtomSelector"
+      ? "proteinAtom"
+      : event.node_type === "ProteinChainSelector" || event.node_type === "ChainFilter"
+        ? "chain"
+        : event.node_type === "FilterByScore"
+          ? "score"
+          : "atom";
+}
+
 function connectionColor(connection: Connection) {
   return portColor(getType(connection.from));
 }
@@ -421,6 +449,11 @@ function nodeByModal() {
 
 function selectorInterface(node = nodeByModal()) {
   if (!node) return undefined;
+  const selectorFields = uiForNode(node).selectorFields ?? {};
+  const metadataField = selectorFields[viewerModal.mode];
+  if (metadataField && (!pendingRunInput.value || pendingRunInput.value.fields.includes(metadataField))) {
+    return node.inputs[metadataField] as NodeInterfaceTypeBase<string> | undefined;
+  }
   if (isChiralityTargetMode(node)) return node.inputs.chiralityTargets as NodeInterfaceTypeBase<string> | undefined;
   if (pendingRunInput.value?.fields.includes("proteinAtoms") || viewerModal.mode === "proteinAtom") return node.inputs.proteinAtoms as NodeInterfaceTypeBase<string> | undefined;
   if (pendingRunInput.value?.fields.includes("chains") || viewerModal.mode === "chain") return node.inputs.chains as NodeInterfaceTypeBase<string> | undefined;
@@ -430,7 +463,7 @@ function selectorInterface(node = nodeByModal()) {
 }
 
 function isChiralityTargetMode(node = nodeByModal()) {
-  return Boolean(pendingRunInput.value?.fields.includes("chiralityTargets") || (node && String(node.type) === "FilterAtomsChirality" && viewerModal.mode === "atom"));
+  return Boolean(pendingRunInput.value?.fields.includes("chiralityTargets") || (node && (uiForNode(node).chiralityTargets || (String(node.type) === "FilterAtomsChirality" && viewerModal.mode === "atom"))));
 }
 
 function selectorValue() {
@@ -662,7 +695,7 @@ async function submitRuntimeInput() {
 }
 
 function specForNode(node: AbstractNode) {
-  return nodeSpecs.find((spec) => spec.type === node.type);
+  return nodeSpecs.value.find((spec) => spec.type === node.type);
 }
 
 function interfaceKey(node: AbstractNode | undefined, intf: NodeInterfaceTypeBase<any>) {
@@ -1327,16 +1360,7 @@ async function openRuntimeInput(event: RunEventPayload) {
   viewerModal.nodeId = event.node_id;
   viewerModal.title = node?.title ?? event.node_type;
   setNodePendingInput(event.node_id, true);
-  viewerModal.mode =
-    event.node_type === "ResidueSelector"
-      ? "residue"
-      : event.node_type === "ProteinAtomSelector" || event.node_type === "ResidueAtomSelector"
-        ? "proteinAtom"
-        : event.node_type === "ProteinChainSelector" || event.node_type === "ChainFilter"
-          ? "chain"
-          : event.node_type === "FilterByScore"
-            ? "score"
-            : "atom";
+  viewerModal.mode = runtimeViewerMode(node, event);
   viewerModal.fileIndex = 0;
   viewerRuntimeFiles.value = await runtimeFilesFromPayloads(pendingRunInput.value.payloads);
   void nextTick(initializeViewer);
@@ -1375,8 +1399,11 @@ function nodeStructureOutput(node: AbstractNode | undefined) {
 
 async function loadViewerRuntimeFiles(nodeId: string) {
   const node = baklava.editor.graph.findNodeById(nodeId);
-  if (!node || !["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter", "FilterAtomsChirality"].includes(String(node.type))) return;
-  if (String(node.type) === "FilterAtomsChirality") {
+  if (!node) return;
+  const sourceMode = String(uiForNode(node).structureSource ?? "");
+  const viewerManaged = Boolean(sourceMode) || ["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter", "FilterAtomsChirality"].includes(String(node.type));
+  if (!viewerManaged) return;
+  if (sourceMode === "runtimePayloadsOrConnectedSource" || String(node.type) === "FilterAtomsChirality") {
     if (pendingRunInput.value?.nodeId === nodeId && runtimeInputPayloads[nodeId]) {
       viewerRuntimeFiles.value = await runtimeFilesFromPayloads(runtimeInputPayloads[nodeId]);
       return;
@@ -1387,7 +1414,7 @@ async function loadViewerRuntimeFiles(nodeId: string) {
     }
     return;
   }
-  const output = String(node.type) === "ChainFilter" || String(node.type) === "PDBViewer"
+  const output = sourceMode === "selfOutputOrConnectedSource" || String(node.type) === "ChainFilter" || String(node.type) === "PDBViewer"
     ? nodeStructureOutput(node) ?? connectedSourceOutput(node)
     : pendingRunInput.value?.nodeId === nodeId
       ? connectedSourceOutput(node)
@@ -1423,7 +1450,7 @@ function structuresForNodeId(nodeId: string, seen = new Set<string>()): Uploaded
   if (seen.has(nodeId)) return [];
   seen.add(nodeId);
   const node = baklava.editor.graph.findNodeById(nodeId);
-  if (node && ["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter", "FilterAtomsChirality"].includes(String(node.type))) {
+  if (node && (uiForNode(node).structureSource || ["PDBViewer", "AtomSelector", "ResidueSelector", "ProteinAtomSelector", "ResidueAtomSelector", "ProteinChainSelector", "ChainFilter", "FilterAtomsChirality"].includes(String(node.type)))) {
     return [];
   }
   const ownFiles = uploadedByNode[nodeId];
@@ -1560,9 +1587,6 @@ watch(runLogs, () => {
   if (logsFollowBottom.value) void nextTick(scrollLogsToBottom);
 }, { deep: true });
 
-registerTypes();
-registerNodes();
-
 baklava.hooks.renderInterface.subscribe("foundry-colors", ({ intf, el }) => {
   const type = getType(intf);
   if (type) {
@@ -1586,10 +1610,6 @@ baklava.hooks.renderNode.subscribe("foundry-node-colors", ({ node, el }) => {
 onMounted(() => {
   restoreApiBase();
   void loadWorkflowPresets();
-  const route = useRoute();
-  if (!route.query.session) {
-    void ensureDefaultWorkflowLoaded();
-  }
   void nextTick(renderViewer);
   if (normalizedApiBase.value) {
     void connectApi();
@@ -1685,7 +1705,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-else-if="activeSidebarPanel === 'nodes'" class="sidebar-panel-body node-browser">
-            <button v-for="spec in nodeSpecs" :key="spec.type" type="button" :style="{ '--node-browser-color': specPrimaryColor(spec) }" @click="addNodeFromSidebar(spec.type)">
+            <button v-for="spec in nodeSpecs.filter((item) => !item.hidden)" :key="spec.type" type="button" :style="{ '--node-browser-color': specPrimaryColor(spec) }" @click="addNodeFromSidebar(spec.type)">
               <strong>{{ spec.title }}</strong>
               <span>{{ spec.category }}</span>
             </button>

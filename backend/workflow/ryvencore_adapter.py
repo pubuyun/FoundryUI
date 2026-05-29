@@ -12,7 +12,7 @@ import ryvencore as rc
 
 from backend.artifacts.registry import artifact_store
 from backend.nodes.common import ExecutionContext
-from backend.nodes.dispatch import HANDLERS
+from backend.nodes.registry import node_for
 from backend.runtime.registry import run_registry
 from backend.schemas.errors import BackendError, make_error
 from backend.schemas.payloads import TypedPayload
@@ -90,8 +90,8 @@ class FoundryRyvencoreNode(rc.Node):
                         cached=True,
                     )
                     return cached, cache_key
-                handler = HANDLERS.get(self.workflow_node.type)
-                if handler is None:
+                node_definition = node_for(self.workflow_node.type)
+                if node_definition is None:
                     raise BackendError(
                         make_error(
                             "MISSING_NODE_HANDLER",
@@ -101,7 +101,7 @@ class FoundryRyvencoreNode(rc.Node):
                             node_type=self.workflow_node.type,
                         )
                     )
-                result = await handler(self.exec_context, self.workflow_node, input_payloads)
+                result = await node_definition.execute(self.exec_context, self.workflow_node, input_payloads)
                 await self.exec_context.registry.set_node_completed(
                     self.exec_context.run_id,
                     self.workflow_node.id,

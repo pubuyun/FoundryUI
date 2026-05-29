@@ -9,6 +9,7 @@ class PortSpec:
     key: str
     type_name: str
     optional: bool = False
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,10 @@ class OptionSpec:
     choices: tuple[Any, ...] = ()
     min_value: float | None = None
     max_value: float | None = None
+    label: str | None = None
+    frontend_default: Any = None
+    accept: str | None = None
+    viewer_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -31,320 +36,16 @@ class NodeSpec:
     terminal: bool = False
 
 
-def _ports(items: list[PortSpec]) -> dict[str, PortSpec]:
+def ports(items: list[PortSpec] | tuple[PortSpec, ...]) -> dict[str, PortSpec]:
     return {item.key: item for item in items}
 
 
-def _options(items: list[OptionSpec]) -> dict[str, OptionSpec]:
+def options(items: list[OptionSpec] | tuple[OptionSpec, ...]) -> dict[str, OptionSpec]:
     return {item.key: item for item in items}
-
-
-NODE_CATALOG: dict[str, NodeSpec] = {
-    "MDNote": NodeSpec(
-        "MDNote",
-        options=_options([OptionSpec("note", "textarea", "")]),
-        terminal=True,
-    ),
-    "ResidueSelector": NodeSpec(
-        "ResidueSelector",
-        inputs=_ports([PortSpec("protein", "Protein", optional=True)]),
-        options=_options([OptionSpec("residues", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
-        outputs=_ports([PortSpec("residues", "List of Residues")]),
-    ),
-    "AtomSelector": NodeSpec(
-        "AtomSelector",
-        inputs=_ports([PortSpec("ligand", "Ligand", optional=True)]),
-        options=_options([OptionSpec("atoms", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
-        outputs=_ports([PortSpec("atoms", "List of Atoms")]),
-    ),
-    "ResidueAtomSelector": NodeSpec(
-        "ResidueAtomSelector",
-        inputs=_ports(
-            [
-                PortSpec("residues", "List of Residues"),
-                PortSpec("protein", "Protein"),
-            ]
-        ),
-        options=_options([OptionSpec("proteinAtoms", "textarea", ""), OptionSpec("viewer", "viewer", "Open")]),
-        outputs=_ports([PortSpec("proteinAtoms", "Residues Atoms List")]),
-    ),
-    "ProteinChainSelector": NodeSpec(
-        "ProteinChainSelector",
-        inputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
-        options=_options([OptionSpec("chains", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
-        outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
-    ),
-    "ChainFilter": NodeSpec(
-        "ChainFilter",
-        inputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
-        options=_options([OptionSpec("chains", "text", ""), OptionSpec("viewer", "viewer", "Open")]),
-        outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
-    ),
-    "LigandInput": NodeSpec(
-        "LigandInput",
-        options=_options(
-            [
-                OptionSpec("file", "file", ""),
-                OptionSpec("viewer", "viewer", "Open"),
-            ]
-        ),
-        outputs=_ports([PortSpec("ligand", "Ligand")]),
-    ),
-    "ProteinInput": NodeSpec(
-        "ProteinInput",
-        options=_options([OptionSpec("file", "file", ""), OptionSpec("viewer", "viewer", "Open")]),
-        outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
-    ),
-    "ProteinWithLigandInput": NodeSpec(
-        "ProteinWithLigandInput",
-        options=_options([OptionSpec("file", "file", ""), OptionSpec("viewer", "viewer", "Open")]),
-        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
-    ),
-    "SequenceInput": NodeSpec(
-        "SequenceInput",
-        options=_options([OptionSpec("file", "file", "")]),
-        outputs=_ports([PortSpec("batchSequence", "Batch Sequence")]),
-    ),
-    "RFDiffusionSMbinder": NodeSpec(
-        "RFDiffusionSMbinder",
-        inputs=_ports(
-            [
-                PortSpec("ligand", "Ligand"),
-                PortSpec("selectFixedAtoms", "List of Atoms", optional=True),
-                PortSpec("selectBuried", "List of Atoms", optional=True),
-                PortSpec("selectExposed", "List of Atoms", optional=True),
-            ]
-        ),
-        options=_options(
-            [
-                OptionSpec("length", "text", "50-200", required=True),
-                OptionSpec("nBatches", "int", 1, min_value=1),
-                OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
-            ]
-        ),
-        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
-    ),
-    "RFDiffusionProteinBinder": NodeSpec(
-        "RFDiffusionProteinBinder",
-        inputs=_ports([PortSpec("protein", "Protein"), PortSpec("selectHotspots", "Residues Atoms List")]),
-        options=_options(
-            [
-                OptionSpec("dialect", "int", 2, min_value=1),
-                OptionSpec("contig", "text", "40-120,/0,A1-100", required=True),
-                OptionSpec("isNonLoopy", "bool", True),
-                OptionSpec("nBatches", "int", 1, min_value=1),
-                OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
-            ]
-        ),
-        outputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
-    ),
-    "RFDiffusionEnzyme": NodeSpec(
-        "RFDiffusionEnzyme",
-        inputs=_ports(
-            [
-                PortSpec("complex", "Batch Protein with Ligand"),
-                PortSpec("ligand", "List of Residues"),
-                PortSpec("unindex", "List of Residues"),
-                PortSpec("selectFixedAtoms", "Residues Atoms List", optional=True),
-                PortSpec("selectBuried", "Residues Atoms List", optional=True),
-                PortSpec("selectExposed", "Residues Atoms List", optional=True),
-            ]
-        ),
-        options=_options(
-            [
-                OptionSpec("length", "text", "180-200", required=True),
-                OptionSpec("nBatches", "int", 1, min_value=1),
-                OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
-            ]
-        ),
-        outputs=_ports([PortSpec("complexes", "Batch Protein with Ligand")]),
-    ),
-    "LigandMPNN": NodeSpec(
-        "LigandMPNN",
-        inputs=_ports(
-            [
-                PortSpec("complexes", "Batch Protein with Ligand"),
-                PortSpec("residues", "List of Residues", optional=True),
-            ]
-        ),
-        options=_options(
-            [
-                OptionSpec("residueRole", "select", "fixed_residues", choices=("fixed_residues", "redesigned_residues")),
-                OptionSpec("numberOfBatches", "int", required=True, min_value=1),
-                OptionSpec("batchSize", "int", required=True, min_value=1),
-                OptionSpec("seed", "int", 42, min_value=0),
-                OptionSpec("temperature", "float", 0.05, min_value=0, max_value=5),
-                OptionSpec("biasAA", "text", ""),
-                OptionSpec("omitAA", "text", ""),
-            ]
-        ),
-        outputs=_ports([PortSpec("sequences", "Batch Sequence")]),
-    ),
-    "ProteinMPNN": NodeSpec(
-        "ProteinMPNN",
-        inputs=_ports(
-            [
-                PortSpec("batchProtein", "Batch Protein"),
-                PortSpec("residues", "List of Residues", optional=True),
-            ]
-        ),
-        options=_options(
-            [
-                OptionSpec("residueRole", "select", "fixed_residues", choices=("fixed_residues", "redesigned_residues")),
-                OptionSpec("numberOfBatches", "int", required=True, min_value=1),
-                OptionSpec("batchSize", "int", required=True, min_value=1),
-                OptionSpec("seed", "int", 42, min_value=0),
-                OptionSpec("temperature", "float", 0.05, min_value=0, max_value=5),
-                OptionSpec("biasAA", "text", ""),
-                OptionSpec("omitAA", "text", ""),
-            ]
-        ),
-        outputs=_ports([PortSpec("sequences", "Batch Sequence")]),
-    ),
-    "RosettaFold": NodeSpec(
-        "RosettaFold",
-        inputs=_ports([PortSpec("sequences", "Batch Sequence"), PortSpec("ligand", "Batch Ligand", optional=True)]),
-        options=_options(
-            [
-                OptionSpec("earlyStoppingPlddtThreshold", "float", 0.5, min_value=0, max_value=1),
-                OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
-                OptionSpec("numSteps", "int", 50, min_value=1),
-                OptionSpec("seed", "int", 42, min_value=0),
-                OptionSpec("inputMode", "select", "Concat inputs", choices=("Concat inputs", "Co-folding")),
-            ]
-        ),
-        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-    ),
-    "RosettaFold3": NodeSpec(
-        "RosettaFold3",
-        inputs=_ports([PortSpec("sequences", "Batch Sequence"), PortSpec("ligand", "Batch Ligand", optional=True)]),
-        options=_options(
-            [
-                OptionSpec("earlyStoppingPlddtThreshold", "float", 0.5, min_value=0, max_value=1),
-                OptionSpec("diffusionBatchSize", "int", 5, min_value=1),
-                OptionSpec("numSteps", "int", 50, min_value=1),
-                OptionSpec("seed", "int", 42, min_value=0),
-                OptionSpec("inputMode", "select", "Concat inputs", choices=("Concat inputs", "Co-folding")),
-            ]
-        ),
-        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-    ),
-    "FilterByScore": NodeSpec(
-        "FilterByScore",
-        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-        options=_options(
-            [
-                OptionSpec("metric", "select", ""),
-                OptionSpec("mode", "select", "Is largest top", choices=("Is largest top", "Is smallest top", "Greater than", "Smaller than", "Higher than", "Lower than")),
-                OptionSpec("threshold", "float", 10),
-            ]
-        ),
-        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-    ),
-    "CalculateProteinRMSD": NodeSpec(
-        "CalculateProteinRMSD",
-        inputs=_ports([PortSpec("reference", "Protein"), PortSpec("batchProtein", "Batch Protein")]),
-        outputs=_ports([PortSpec("score", "Score")]),
-    ),
-    "CalculateLigandRMSD": NodeSpec(
-        "CalculateLigandRMSD",
-        inputs=_ports([PortSpec("reference", "Ligand"), PortSpec("ligands", "Batch Protein (With Ligand)")]),
-        outputs=_ports([PortSpec("score", "Score")]),
-    ),
-    "FilterChirality": NodeSpec(
-        "FilterChirality",
-        inputs=_ports(
-            [
-                PortSpec("complexes", "Batch Protein (With Ligand)"),
-                PortSpec("score", "Score", optional=True),
-            ]
-        ),
-        options=_options([OptionSpec("smiles", "textarea", "", required=True)]),
-        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-    ),
-    "FilterAtomsChirality": NodeSpec(
-        "FilterAtomsChirality",
-        inputs=_ports(
-            [
-                PortSpec("complexes", "Batch Protein (With Ligand)"),
-                PortSpec("score", "Score", optional=True),
-            ]
-        ),
-        options=_options([OptionSpec("chiralityTargets", "textarea", "")]),
-        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-    ),
-    "BinaryLogic": NodeSpec(
-        "BinaryLogic",
-        inputs=_ports(
-            [
-                PortSpec("structures1", "Batch Protein (With Ligand)"),
-                PortSpec("score1", "Score", optional=True),
-                PortSpec("structures2", "Batch Protein (With Ligand)"),
-                PortSpec("score2", "Score", optional=True),
-            ]
-        ),
-        options=_options([OptionSpec("operation", "select", "OR", choices=("OR", "AND", "NOR", "NAND", "XOR"))]),
-        outputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-    ),
-    "Protein2Seq": NodeSpec(
-        "Protein2Seq",
-        inputs=_ports([PortSpec("batchProtein", "Batch Protein")]),
-        outputs=_ports([PortSpec("sequences", "Batch Sequence")]),
-    ),
-    "Merge": NodeSpec(
-        "Merge",
-        inputs=_ports([PortSpec("inputA", "Batch Protein (With Ligand)"), PortSpec("inputB", "Batch Protein (With Ligand)")]),
-        outputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)")]),
-    ),
-    "Split": NodeSpec(
-        "Split",
-        inputs=_ports([PortSpec("complexes", "Batch Protein (With Ligand)")]),
-        outputs=_ports([PortSpec("batchLigand", "Batch Ligand"), PortSpec("batchProtein", "Batch Protein")]),
-    ),
-    "PDBViewer": NodeSpec(
-        "PDBViewer",
-        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)")]),
-        options=_options([OptionSpec("viewer", "viewer", "Open")]),
-        terminal=True,
-    ),
-    "SequenceViewer": NodeSpec(
-        "SequenceViewer",
-        inputs=_ports([PortSpec("sequences", "Batch Sequence")]),
-        options=_options([OptionSpec("file", "text", "")]),
-        terminal=True,
-    ),
-    "SaveProteinsWithScores": NodeSpec(
-        "SaveProteinsWithScores",
-        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)"), PortSpec("score", "Score")]),
-        options=_options([OptionSpec("folder", "text", "outputs/proteins")]),
-        terminal=True,
-    ),
-    "SaveProteins": NodeSpec(
-        "SaveProteins",
-        inputs=_ports([PortSpec("structures", "Batch Protein (With Ligand)")]),
-        options=_options([OptionSpec("folder", "text", "outputs/proteins")]),
-        terminal=True,
-    ),
-    "SaveSequences": NodeSpec(
-        "SaveSequences",
-        inputs=_ports([PortSpec("sequences", "Batch Sequence")]),
-        options=_options([OptionSpec("folder", "text", "outputs/sequences")]),
-        terminal=True,
-    ),
-    "SaveLigands": NodeSpec(
-        "SaveLigands",
-        inputs=_ports([PortSpec("ligand", "Ligand")]),
-        options=_options([OptionSpec("folder", "text", "outputs/ligands")]),
-        terminal=True,
-    ),
-}
 
 
 def spec_for(node_type: str) -> NodeSpec | None:
-    if node_type == "RosettaFold3":
-        return NODE_CATALOG["RosettaFold3"]
-    if node_type == "ProteinAtomSelector":
-        return NODE_CATALOG["ResidueAtomSelector"]
-    if node_type == "ProteinChainSelector":
-        return NODE_CATALOG["ChainFilter"]
-    return NODE_CATALOG.get(node_type)
+    from backend.nodes.registry import node_for
+
+    node = node_for(node_type)
+    return node.spec if node is not None else None

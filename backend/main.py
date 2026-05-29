@@ -27,6 +27,8 @@ from backend.schemas.payloads import TypedPayload
 from backend.schemas.workflow import EmbeddedUpload, FoundryWorkflowDocument, RunCreateRequest, WorkflowGraph, WorkflowValidationResponse
 from backend.workflow.validation import validate_workflow
 from backend.nodes.common import option_file_tokens
+from backend.workflow.frontend_catalog import frontend_node_catalog
+from backend.nodes.registry import node_for
 
 
 app = FastAPI(title="FoundryUI Backend")
@@ -50,6 +52,11 @@ async def health() -> dict[str, str]:
 @app.get("/api/health")
 async def api_health() -> dict[str, str]:
     return await health()
+
+
+@app.get("/api/nodes")
+async def node_catalog() -> dict[str, Any]:
+    return frontend_node_catalog()
 
 
 def _ensure_worker() -> None:
@@ -339,22 +346,20 @@ def _validate_run_uploads(request: RunCreateRequest):
     graph = request.workflow_graph()
     uploads = request.embedded_uploads()
     for node in graph.nodes:
-        if node.type == "LigandInput":
-            node_errors = _validate_input_node_files(node, uploads, {"pdb"}, "LigandInput requires uploaded PDB content or upload file ids.", "MISSING_LIGAND_FILE", "INVALID_LIGAND_FILE")
-            if node_errors:
-                errors.extend(node_errors)
-        elif node.type == "ProteinInput":
-            node_errors = _validate_input_node_files(node, uploads, {"pdb"}, "ProteinInput requires uploaded PDB content or upload file ids.", "MISSING_PROTEIN_FILE", "INVALID_PROTEIN_FILE")
-            if node_errors:
-                errors.extend(node_errors)
-        elif node.type == "ProteinWithLigandInput":
-            node_errors = _validate_input_node_files(node, uploads, {"pdb"}, "ProteinWithLigandInput requires uploaded PDB content or upload file ids.", "MISSING_COMPLEX_FILE", "INVALID_COMPLEX_FILE")
-            if node_errors:
-                errors.extend(node_errors)
-        elif node.type == "SequenceInput":
-            node_errors = _validate_input_node_files(node, uploads, {"fasta", "fa"}, "SequenceInput requires uploaded FASTA content or upload file ids.", "MISSING_FASTA_FILE", "INVALID_FASTA_FILE")
-            if node_errors:
-                errors.extend(node_errors)
+        node_definition = node_for(node.type)
+        upload_validation = node_definition.upload_validation if node_definition is not None else None
+        if upload_validation is None:
+            continue
+        node_errors = _validate_input_node_files(
+            node,
+            uploads,
+            upload_validation.allowed_types,
+            upload_validation.missing_message,
+            upload_validation.missing_code,
+            upload_validation.invalid_code,
+        )
+        if node_errors:
+            errors.extend(node_errors)
     return errors
 
 
