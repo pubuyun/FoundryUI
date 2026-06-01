@@ -110,6 +110,7 @@ let viewer: any;
 let viewerZoomKey = "";
 let viewerOpenSequence = 0;
 let catalogRegistered = false;
+let runStatusPollTimer: ReturnType<typeof setInterval> | null = null;
 
 const sidebarPanels: Array<{ key: SidebarPanel; label: string; icon: string }> = [
   { key: "logs", label: "Logs", icon: ">" },
@@ -896,6 +897,9 @@ async function refreshRunStatus(runId = currentRunId.value) {
     runLogs.value = status.recent_output.slice(-160);
   }
   openPendingInputFromStatus(status);
+  if (status.state === "completed" || status.state === "failed" || status.state === "stopped") {
+    closeRunEvents();
+  }
 }
 
 function openPendingInputFromStatus(status: RunStatus) {
@@ -943,6 +947,7 @@ function connectRunEvents(runId: string) {
   closeRunEvents();
   const source = new EventSource(apiUrl(`/api/runs/${runId}/events`));
   eventSource.value = source;
+  startRunStatusPolling(runId);
   const eventNames = [
     "queued",
     "started",
@@ -967,11 +972,27 @@ function connectRunEvents(runId: string) {
   });
   source.onerror = () => {
     if (runState.value !== "completed" && runState.value !== "failed" && runState.value !== "stopped") {
-      runMessage.value = "Event stream disconnected";
+      if (!pendingRunInput.value) runMessage.value = "Event stream reconnecting";
       void refreshRunStatus(runId);
     }
-    closeRunEvents();
   };
+}
+
+function startRunStatusPolling(runId: string) {
+  stopRunStatusPolling();
+  runStatusPollTimer = setInterval(() => {
+    if (currentRunId.value !== runId || !isRunActive.value) {
+      stopRunStatusPolling();
+      return;
+    }
+    void refreshRunStatus(runId);
+  }, 2000);
+}
+
+function stopRunStatusPolling() {
+  if (!runStatusPollTimer) return;
+  clearInterval(runStatusPollTimer);
+  runStatusPollTimer = null;
 }
 
 function handleRunEvent(event: RunEventPayload) {
@@ -1044,6 +1065,7 @@ function shouldClosePendingInput(event: RunEventPayload) {
 function closeRunEvents() {
   eventSource.value?.close();
   eventSource.value = null;
+  stopRunStatusPolling();
 }
 
 function artifactUrl(artifact: BackendArtifact) {
