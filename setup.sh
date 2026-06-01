@@ -46,7 +46,7 @@ export FOUNDRY_CHECKPOINT_DIRS="$MODELS_DIR"
 "$VENV_DIR/bin/python" -m pip install "rc-foundry[all]"
 
 if [[ ! -d "$FOUNDRY_DIR/.git" ]]; then
-  git clone https://github.com/RosettaCommons/foundry.git "$FOUNDRY_DIR"
+  git clone https://github.com/pubuyun/foundry.git "$FOUNDRY_DIR"
 fi
 
 "$VENV_DIR/bin/foundry" install base-models --checkpoint-dir "$MODELS_DIR"
