@@ -66,7 +66,6 @@ const typeConversions = ref<Array<{ from: PortType; to: PortType }>>([]);
 const nodeCatalogLoaded = ref(false);
 const uploadedByNode = reactive<Record<string, UploadedStructure[]>>({});
 const DEFAULT_API_BASE = "/api";
-const LEGACY_DEFAULT_API_BASES = new Set(["http://127.0.0.1:3000/api"]);
 const DEFAULT_WORKFLOW_PRESET = "ligand-binder-denovo.fuiworkflow";
 const apiBase = ref(DEFAULT_API_BASE);
 const apiStatus = ref<"idle" | "checking" | "available" | "unavailable">("idle");
@@ -136,7 +135,7 @@ function apiUrl(path: string) {
 function restoreApiBase() {
   if (!import.meta.client) return;
   const storedApiBase = localStorage.getItem("foundryui-api-base");
-  apiBase.value = storedApiBase && !LEGACY_DEFAULT_API_BASES.has(storedApiBase) ? storedApiBase : DEFAULT_API_BASE;
+  apiBase.value = storedApiBase? storedApiBase : DEFAULT_API_BASE;
   apiMessage.value = apiBase.value === DEFAULT_API_BASE ? "Using default local API" : "API URL loaded";
 }
 
