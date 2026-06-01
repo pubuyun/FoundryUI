@@ -119,17 +119,17 @@ const sidebarPanels: Array<{ key: SidebarPanel; label: string; icon: string }> =
 ];
 
 const canBulkSelectAtoms = computed(() => viewerModal.mode === "atom" && !isChiralityTargetMode());
-
 function apiUrl(path: string) {
   const base = normalizedApiBase.value;
-  if (!base) {
-    throw new Error("Enter an API URL and click Connect.");
+
+  const cleanBase = base.replace(/\/+$/, "");
+  let cleanPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (cleanBase.endsWith("/api") && cleanPath.startsWith("/api/")) {
+    cleanPath = cleanPath.slice("/api".length);
   }
-  let requestPath = path.startsWith("/") ? path : `/${path}`;
-  if (base.endsWith("/api") && requestPath.startsWith("/api/")) {
-    requestPath = requestPath.slice(4);
-  }
-  return `${base}${requestPath}`;
+
+  return `${cleanBase}${cleanPath}`;
 }
 
 function restoreApiBase() {
