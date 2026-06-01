@@ -3,7 +3,7 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "prebuild": "yarn",
+        "prebuild": "npm install",
         "build": "nuxt build",
         "dev": "nuxt dev --host 127.0.0.1",
         "preview": "nuxt preview",
