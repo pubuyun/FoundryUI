@@ -1,4 +1,9 @@
 * [Home](README.md)
+* iGEM
+  * [Overview](igem/FoundryUI.md)
+  * [Installation](igem/Installation.md)
+  * [Usage](igem/Usage.md)
+  * [Development](igem/Development.md)
 * Install
   * [Installtion script](install/installation-script.md)
   * [Images](install/images.md)
