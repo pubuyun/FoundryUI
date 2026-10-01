@@ -59,8 +59,8 @@
     * [Save Ligands](nodes/save/save-ligands.md)
 * Examples
   * [Enzyme Design](examples/enzymedesign.md)
-  * [Ligand Binder Denovo](examples/ligand-binder-denovo.md)
+  * [Ligand Binder](examples/ligand-binder-denovo.md)
   * [Ligand MPNN](examples/ligandmpnn.md)
   * [Protein Binder](examples/proteinbinder.md)
   * [Protein MPNN](examples/proteinmpnn.md)
-  * [RF3](examples/rf3.md)
+  * [Folding Prediction](examples/rf3.md)

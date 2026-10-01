@@ -1,0 +1,3 @@
+1. Change CalculateProteinRMSD to receive two Batch or single Protein inputs, and check them for the same length, and calculate their rmsd correspondingly. If one of them is a Single protein, use it against all other.
+2. add a manual node: Protein Batch To Single, which receives Batch protein, and turn that into a single protein output, the user can use 3d selector to select which protein they would like to output.
+3. Change Batch Sequence Input node, to allow the user to select whether they want to upload fasta file or input manually, and add space to allow user input many sequences manually.
